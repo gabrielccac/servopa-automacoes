@@ -1,0 +1,28 @@
+{
+  "customers": [
+    {
+      "nr_contrato": "FIXTURE-D1",
+      "nr_cota": "1000.01-1",
+      "nm_consorciado": "Fixture One",
+      "cd_whatsapp": "5511999990001",
+      "dt_primeira_ocorrencia": "2026-07-27",
+      "st_ativo": true
+    },
+    {
+      "nr_contrato": "FIXTURE-D7",
+      "nr_cota": "1000.02-1",
+      "nm_consorciado": "Fixture Two",
+      "cd_whatsapp": "5511999990002",
+      "dt_primeira_ocorrencia": "2026-07-21",
+      "st_ativo": true
+    },
+    {
+      "nr_contrato": "FIXTURE-NONE",
+      "nr_cota": "1000.03-1",
+      "nm_consorciado": "Fixture Three",
+      "cd_whatsapp": "5511999990003",
+      "dt_primeira_ocorrencia": "2026-07-26",
+      "st_ativo": true
+    }
+  ]
+}

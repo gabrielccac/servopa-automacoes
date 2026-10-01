@@ -1,0 +1,12 @@
+{
+  "dtVenc": 8,
+  "customers": [
+    {
+      "nr_contrato": "FIXTURE-BID-1",
+      "nr_cota": "1000.01-1",
+      "nr_grupo": "1000",
+      "tp_lance": "FIXO",
+      "pct_lance": 30
+    }
+  ]
+}
