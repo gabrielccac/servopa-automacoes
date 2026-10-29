@@ -63,6 +63,10 @@ preserva dados anteriores e não bloqueia automaticamente a análise de ofertas.
 
 ### Migração para grupos estruturados
 
+Concluída no projeto atual em 29/10/2026: SQLs 002/003 aplicados, população
+validada e produção `20261029.3`. As etapas abaixo documentam a migração;
+não repetir o backfill legado após remover `regras_texto` e `planos`.
+
 Esta mudança exige SQL administrativo; credencial REST não executa DDL.
 Não publicar a nova versão antes da etapa 1 e do backfill:
 

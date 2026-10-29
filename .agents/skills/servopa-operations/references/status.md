@@ -22,12 +22,12 @@ oficial; publicação no GitHub não significa deploy no Trigger.dev.
 - Esta entrega inclui o código de grupos, a nova seleção de ofertas, a skill,
   o setup e os guias versionados. Consulte o histórico de commits da branch.
 
-## Revisão estruturada — publicada e populada; limpeza SQL pendente
+## Revisão estruturada — concluída
 
 O código atual troca `regras_texto` por `regras_assembleias` JSONB e `planos` por
 `taxas_administracao` JSONB. Mantém tipos, percentuais, próxima assembleia,
-calendário, disponibilidade e `updated_at`. Remove os nove campos aprovados
-somente após migração validada. As tabelas do Daily Sync não são alteradas.
+calendário, disponibilidade e `updated_at`. Os nove campos aprovados foram
+removidos após migração validada. As tabelas do Daily Sync foram preservadas.
 As faixas preservam a ordem dos sorteios e das modalidades, inclusive repetições,
 percentuais, uso de embutido e observações/condições contratuais.
 O fluxo de ofertas passa a ler o JSON validado, mantendo a regra de disponibilidade
@@ -44,11 +44,13 @@ bem-sucedidos, zero parciais/falhas, 93 faixas, 881 condições de taxa e 757
 assembleias. Leitura posterior confirmou os JSONs e os 32 logs da mesma run;
 todos atendem aos pré-requisitos do SQL 003. Nenhum WhatsApp ou lance foi disparado.
 
-Pendente somente a execução administrativa de `sql/003_grupos_limpeza.sql` e a
-conferência posterior do esquema. Ela já foi liberada após validar a coleta.
-As nove colunas antigas ainda estão no banco até essa execução. O acesso REST
-não permite DDL; a aplicação da limpeza foi solicitada ao responsável.
-Não anunciar a exclusão como concluída antes de verificar o esquema real.
+SQL 003 aplicado pelo responsável e conferido por REST: `grupos` tem 19 colunas,
+nenhuma das nove colunas retiradas permanece. Os 32 grupos continuam com 93
+faixas, 881 condições de taxa e 757 assembleias; view acessível com 365 linhas.
+O consumidor real `fetchOfferGroupConfigs` leu os 32 grupos sem erro após a
+limpeza. As duas tabelas originais do Daily Sync continuam acessíveis.
+Não executar novamente o backfill legado após a exclusão de `regras_texto` e
+`planos`. Futuras atualizações usam a task e o cron existentes.
 
 ## Histórico anterior à estrutura JSONB
 
