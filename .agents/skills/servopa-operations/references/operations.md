@@ -136,17 +136,28 @@ npx -y trigger.dev@4.5.16 deploy --env prod --skip-update-check
 8. Atualize o estado/documentação quando a mudança for publicada ou a regra mudar.
    Só faça commit/push quando solicitado ou incluído no escopo do trabalho.
 
-## Agendamento dinâmico: capacidade versus implementação
+## Agendamentos fixos e capacidade dinâmica
 
 O SDK instalado suporta uma data exata em `delay` e `runs.reschedule` para uma
 execução ainda pendente. `schedules.create` configura recorrência e exige uma
 task definida com `schedules.task`. Isso não significa que nosso planejador já existe.
 
-A proposta aprovada para evolução é mensal, não um novo planejador diário:
-agrupar por grupo/assembleia, lances D-2 e ofertas antes da primeira execução
-mensal de lances. Mudanças posteriores no calendário exigem conciliar execuções
-pendentes, manter seus IDs e revalidar contexto na hora da execução. Esse controle
-ainda precisa de implementação; não converter a proposta em cron real durante setup.
+A decisão vigente usa crons fixos em `src/trigger/monthly-schedules.ts`:
+ofertas dias 1 e 15; lances dias 6, 14 e 18 para vencimentos 8, 16 e 20.
+Horário nominal 09:00 São Paulo, novos crons exclusivos de produção.
+Não implementar o planejador mensal anterior: foi substituído por essa decisão.
+O cron é registrado no deploy; a run aparece em cada ocorrência, sem deixar
+uma run `DELAYED` por cliente. Conferir no painel o cron, ambiente, estado ativo,
+`nextRun` e horário efetivo (o plano pode aplicar janela). Os wrappers validam a
+data nominal contra o dia atual e usam chave global por data; o filho de lances
+continua protegendo contrato/mês e exigindo confirmação gerencial.
+Para recuperar uma data perdida, investigar os logs e usar a tarefa original
+com payload explícito; não alterar timestamps do wrapper para forçar reenvio.
+Novos vencimentos exigem ampliar o cron e a seleção, com teste. A auditoria de
+29/10 cruzou 48 contratos em 13 grupos com calendários até junho/2027; lances
+nas datas fixas ficariam de 6 a 12 dias antes das assembleias. Isso não comprova
+o prazo de encerramento de lances no portal. Ofertas do dia 15 não são aplicadas
+automaticamente ao lote já processado no dia 14.
 
 ## Limites de diagnóstico
 

@@ -16,7 +16,7 @@ import type { ServopaCustomerRef } from "../lib/servopa/customer-context.js";
 import { HttpClient } from "../lib/servopa/http-client.js";
 import { buildDateScopedReminderIdempotencyKey } from "../lib/idempotency.js";
 import { normalizePhone } from "../lib/parsers.js";
-import { parseReminderPayload, type ReminderTaskInput } from "../lib/reminders/shared.js";
+import { parseReminderPayload, type ReminderPayload, type ReminderTaskInput } from "../lib/reminders/shared.js";
 import {
   buildBidSubmissionIdempotencyKey,
   fetchSubmittedBidLogsForReferenceMonth,
@@ -41,7 +41,10 @@ import {
   sendTextMessage,
 } from "../lib/whatsapp/zapi.js";
 
-type SubmitBidTaskInput = ReminderTaskInput<SubmitBidCandidate>;
+type SubmitBidTaskInput = ReminderTaskInput<SubmitBidCandidate> | (ReminderPayload<SubmitBidCandidate> & {
+  dtVenc?: number;
+  stopBeforeRegister?: boolean;
+});
 
 const SUBMIT_BID_CUSTOMER_KEYS = ["nr_contrato", "nr_cota", "nr_grupo", "tp_lance", "pct_lance"];
 
@@ -452,7 +455,7 @@ export const submitBid = task({
   maxDuration: 900,
   queue: { concurrencyLimit: 1 },
   run: async (payload?: SubmitBidTaskInput) => {
-    const { customers: payloadCustomers, dryRun, asOfDate } = parseReminderPayload(
+    const { customers: payloadCustomers, dryRun, asOfDate } = parseReminderPayload<SubmitBidCandidate>(
       payload,
       SUBMIT_BID_CUSTOMER_KEYS,
     );

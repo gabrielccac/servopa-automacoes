@@ -18,9 +18,21 @@ A rotina diária começa às 08:00 em `America/Sao_Paulo`: sincronização,
 pagamento D2, verificação de ativos, aniversário e contemplação. A cobrança
 de inadimplentes acontece a partir das 12:00, seguida do resumo operacional.
 
-O calendário de ofertas e lances está definido na documentação e ainda será
-implementado no código: oferta um dia antes da primeira execução mensal de
-lances; lances dois dias antes da assembleia dos respectivos clientes.
+Os novos crons de produção estão em `src/trigger/monthly-schedules.ts`, no fuso
+`America/Sao_Paulo`, com horário nominal de 09:00:
+
+- `scheduled-offers`: dias 1 e 15 de cada mês, chama `offer-reminder`.
+- `scheduled-submit-bid`: dias 6, 14 e 18, chama `submit-bid` para os vencimentos
+  8, 16 e 20, respectivamente. Mantém a aprovação gerencial e os logs mensais.
+
+A regra usa vencimento menos dois dias, não assembleia menos dois dias.
+Não há planejador mensal nem criação de runs futuras por cliente. O Trigger
+registra as recorrências no deploy e cria uma execução em cada ocorrência.
+Os novos crons ficam restritos à produção; executar dev não os ativa.
+O horário efetivo depende da janela aplicada pelo plano e da fila do Trigger.
+Replays de datas antigas são bloqueados; recuperação manual deve usar as tarefas
+originais após conferir os logs. Novos dias de vencimento exigem atualizar o cron
+e sua seleção. As ofertas do dia 15 não refazem o lote de lances do dia 14.
 
 O `offer-reminder` consulta as regras salvas em `grupos` em cada execução e
 calcula a hierarquia de Fidelidade daquele grupo (por exemplo, 30/15 ou

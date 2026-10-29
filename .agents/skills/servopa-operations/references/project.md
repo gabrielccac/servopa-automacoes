@@ -51,13 +51,18 @@ cadastros e contratos para aniversário e verificação de ativos.
 | `fidelidade-sync` | Preenche `gp_fidelidade` ainda nulo com referência de resultados dos grupos | Atualização de cadastro; não é o fluxo de oferta |
 | `offer-reminder` | Analisa evolução disponível por contrato e agrupa mensagem por cliente/condição | Envio de oferta com botões e logs; aceite externo |
 | `submit-bid` | Pré-checagem, revisão gerencial, simulação, registro e comprovante | Mensagens, espera por confirmação, registro financeiro e auditoria |
+| `scheduled-submit-bid` | Cron de produção dias 6, 14 e 18, 09:00 São Paulo; seleciona vencimentos 8, 16 e 20 | Chama `submit-bid` com aprovação gerencial e proteção por data |
+| `scheduled-offers` | Cron de produção dias 1 e 15, 09:00 São Paulo | Chama `offer-reminder` com os dados atuais e proteção por data |
 | `groups-sync` | Busca e atualiza características de cada grupo | Escrita nas duas tabelas de grupos; nenhum WhatsApp |
 | `diagnose-servopa-access` | Diagnóstico de acesso do portal | Requisições de diagnóstico; ler payload/esquema antes de usar |
 | `diagnose-servopa-login-matrix` | Diagnóstico de perfis de login | Tentativas de autenticação; pode usar Python |
 
-Somente `daily-orchestrator` define o cron diário no estado atual. As outras
-tarefas podem ser disparadas por ele ou manualmente. Não criar crons duplicados
-nos filhos para reproduzir horários descritos na documentação antiga.
+Há três definições de cron: `daily-orchestrator` e os dois wrappers em
+`src/trigger/monthly-schedules.ts`. Os novos crons são exclusivos de produção;
+as tarefas originais continuam disponíveis para execução manual e dry run.
+As datas de lances usam vencimento menos dois dias, sem planejador mensal.
+O horário nominal é sujeito à janela do plano e à fila. Não criar crons duplicados
+nos filhos. Replays dos wrappers fora da data pretendida são bloqueados.
 
 ## Tabelas principais
 
