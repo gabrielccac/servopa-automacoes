@@ -5,6 +5,12 @@ Supabase principal e complementar e WhatsApp via Z-API.
 
 ## Documentação operacional
 
+Para preparar o agente técnico de outra pessoa, use
+[ONBOARDING-AGENTE.md](ONBOARDING-AGENTE.md) e a skill
+[servopa-operations](.agents/skills/servopa-operations/SKILL.md).
+Ela reúne setup, mapa dos fluxos/tabelas, diagnóstico e estado de publicação.
+Credenciais reais devem ser configuradas separadamente no `.env` local.
+
 [Documentação Fluxos no Notion](https://app.notion.com/p/35d8271577b980808fa2eddfcf21333e)
 descreve objetivos, horários, tabelas, efeitos e resultados das tarefas.
 
@@ -16,10 +22,28 @@ O calendário de ofertas e lances está definido na documentação e ainda será
 implementado no código: oferta um dia antes da primeira execução mensal de
 lances; lances dois dias antes da assembleia dos respectivos clientes.
 
+O `offer-reminder` consulta as regras salvas em `grupos` em cada execução e
+calcula a hierarquia de Fidelidade daquele grupo (por exemplo, 30/15 ou
+30/20/10). Cruza essa hierarquia com as opções individuais disponíveis na
+Servopa e com o estado de `lances`; histórico de mensagens não comprova aceite.
+Contratos sem estado conhecido ficam pendentes de revisão. O dry run retorna
+hierarquias, lances atuais, candidatos e motivos de exclusão, sem gravar ou enviar.
+
 Respostas às ofertas, confirmação gerencial por webhook e envio de PDF por
 e-mail dependem de processos externos a este repositório.
 
 ## Desenvolvimento
+
+A task `groups-sync` consulta os grupos distintos de `bd_producao` e os já
+armazenados em `grupos`. Atualiza cadastro, planos, assembleias e históricos
+com/sem embutido; registra cada tentativa em `grupos_sincronizacoes`.
+Execute com `{ "dryRun": true }` para ler o portal sem gravar, ou
+`{ "groups": [1565], "dryRun": true }` para limitar a consulta. Sem `groups`,
+consulta toda a referência. A execução normal grava os dados e o histórico.
+Seções com falha preservam seus dados anteriores; planos ausentes só ficam
+indisponíveis após leitura completa. O texto das regras é preservado, sem
+inferir a elegibilidade individual dos clientes. A task não envia mensagens
+e ainda não tem agendamento automático.
 
 Requer Node.js com npm. Python é usado na matriz ampla de diagnóstico de login.
 

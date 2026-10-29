@@ -1,6 +1,6 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { getConfig } from "../lib/config.js";
-import { getCustomerPaymentInfo } from "../lib/servopa/customer-payment-info.js";
+import { getCustomerPaymentInfo, refreshCustomerPaymentLinks } from "../lib/servopa/customer-payment-info.js";
 import type { ServopaCustomerRef } from "../lib/servopa/customer-context.js";
 import { HttpClient } from "../lib/servopa/http-client.js";
 import { buildDateScopedReminderIdempotencyKey } from "../lib/idempotency.js";
@@ -170,8 +170,10 @@ export const paymentReminder = task({
   run: async (payload: unknown) => {
     const { customers: payloadCustomers, dryRun, respectIdempotency, asOfDate, sendSummary } =
       parseReminderPayload(payload as PaymentReminderTaskInput, PAYMENT_CUSTOMER_KEYS);
-    const initialCustomers =
-      payloadCustomers ?? (await fetchUpcomingPaymentReminderCustomers(asOfDate ?? undefined));
+    const initialCustomers = await fetchUpcomingPaymentReminderCustomers(
+      asOfDate ?? undefined,
+      payloadCustomers ?? undefined,
+    );
     const fetchedCount = initialCustomers.length;
     const shouldApplyReminderLogFilter = !payloadCustomers || respectIdempotency;
     const shouldPersistReminderLogs = !dryRun;
@@ -294,6 +296,12 @@ export const paymentReminder = task({
                 phone,
                 message: reminderMessage,
                 buttonActions,
+                refreshButtonActions: async () => {
+                  const boleto = getPrimaryBoleto(paymentInfo);
+                  if (!boleto) throw new Error("Original boleto is missing");
+                  await refreshCustomerPaymentLinks(client, customerRef, boleto);
+                  return buildButtonActions(paymentInfo);
+                },
                 dryRun,
               });
               const status = dryRun ? "dry-run" : "sent";

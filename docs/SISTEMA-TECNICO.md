@@ -1,5 +1,11 @@
 # Documentação técnica do sistema
 
+> Documento histórico: há seções abaixo com nomes, regras e horários superados.
+> Para a implementação atual, consulte
+> [o mapa atualizado do projeto](../.agents/skills/servopa-operations/references/project.md),
+> [o estado de publicação](../.agents/skills/servopa-operations/references/status.md)
+> e [o setup do agente](../ONBOARDING-AGENTE.md).
+
 ## Visão geral
 
 O projeto automatiza rotinas de consórcio usando quatro componentes:

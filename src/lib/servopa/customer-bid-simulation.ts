@@ -327,6 +327,7 @@ export async function simulateCustomerBid(
   const simulationResp = await client.post(
     LANCES_PATH,
     new URLSearchParams(simulationPayload),
+    { retrySafe: true },
   );
   if (!simulationResp.ok) {
     throw new Error(`Failed to simulate bid - HTTP ${simulationResp.status}`);

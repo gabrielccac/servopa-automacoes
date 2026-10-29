@@ -15,11 +15,12 @@ import { decodeEntities } from "../parsers.js";
 const BASE_URL = "https://www.consorcioservopa.com.br";
 const LOGIN_URL = `${BASE_URL}/vendas/login`;
 const LOGIN_MAX_ATTEMPTS = 3;
-const LOGIN_RETRY_DELAYS_MS = [2_000, 5_000];
+const RETRY_DELAYS_MS = [2_000, 5_000];
+const REQUEST_MAX_ATTEMPTS = 3;
 const WORKING_LOGIN_PROFILES: BrowserProfile[] = [
   "firefox_149", "firefox_147", "firefox_135", "safari_18",
 ];
-const RETRYABLE_LOGIN_STATUSES = new Set([403, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525]);
+const RETRYABLE_HTTP_STATUSES = new Set([403, 408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525]);
 
 interface HttpClientOptions {
   cpfCnpj: string;
@@ -58,13 +59,43 @@ function getHttpStatus(error: unknown): number | null {
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
-function shouldRetryLogin(error: unknown): boolean {
+function shouldRetryRequest(error: unknown): boolean {
   const status = getHttpStatus(error);
-  if (status !== null) return RETRYABLE_LOGIN_STATUSES.has(status);
+  if (status !== null) return RETRYABLE_HTTP_STATUSES.has(status);
 
-  return /fetch|timeout|timed out|econnreset|eai_again|socket/i.test(
+  return /fetch|timeout|timed out|econnreset|eai_again|socket|error sending request|connection.*(?:reset|closed)|unexpected eof/i.test(
     String(error instanceof Error ? error.message : error),
   );
+}
+
+export async function requestWithRetries<T extends { status: number }>(
+  request: () => Promise<T>,
+  method = "GET",
+  retrySafe = true,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    let status: number | null = null;
+    try {
+      const response = await request();
+      // A 403 explicitly rejects the request; unlike a lost response, it can be retried for POSTs too.
+      const retryable = response.status === 403 ||
+        (retrySafe && RETRYABLE_HTTP_STATUSES.has(response.status));
+      if (attempt === REQUEST_MAX_ATTEMPTS || !retryable) {
+        return response;
+      }
+      status = response.status;
+    } catch (error) {
+      status = getHttpStatus(error);
+      const retryable = status === 403 || (retrySafe && shouldRetryRequest(error));
+      if (attempt === REQUEST_MAX_ATTEMPTS || !retryable) throw error;
+    }
+    const delayMs = RETRY_DELAYS_MS[attempt - 1]!;
+    console.warn(`Servopa request attempt ${attempt} failed; retrying in ${delayMs}ms`, {
+      method,
+      status,
+    });
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }
 
 export function loginProfiles(browser?: BrowserProfile): BrowserProfile[] {
@@ -156,11 +187,11 @@ export class HttpClient {
         lastError = error;
         await this.close().catch(() => undefined);
 
-        if (attempt === maxAttempts || !shouldRetryLogin(error)) {
+        if (attempt === maxAttempts || !shouldRetryRequest(error)) {
           throw error;
         }
 
-        const delayMs = LOGIN_RETRY_DELAYS_MS[attempt - 1] ?? LOGIN_RETRY_DELAYS_MS.at(-1)!;
+        const delayMs = RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS.at(-1)!;
         console.warn(`Servopa login attempt ${attempt} failed; retrying in ${delayMs}ms`, {
           status: getHttpStatus(error),
           browser,
@@ -172,14 +203,26 @@ export class HttpClient {
     throw lastError instanceof Error ? lastError : new Error("Servopa login failed");
   }
 
-  async get(path: string): Promise<WreqResponse> {
+  private async request(
+    path: string,
+    options?: Parameters<Session["fetch"]>[1],
+    retrySafe = true,
+  ): Promise<WreqResponse> {
     if (!this.session) throw new Error("Not logged in");
-    return this.session.fetch(`${BASE_URL}${path}`);
+    // Reuse the session so retries preserve the selected contract.
+    return requestWithRetries(
+      () => this.session!.fetch(`${BASE_URL}${path}`, options),
+      options?.method ?? "GET",
+      retrySafe,
+    );
+  }
+
+  async get(path: string): Promise<WreqResponse> {
+    return this.request(path);
   }
 
   async getBuffer(path: string): Promise<Buffer> {
-    if (!this.session) throw new Error("Not logged in");
-    const resp = await this.session.fetch(`${BASE_URL}${path}`, {
+    const resp = await this.request(path, {
       headers: {
         Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
       },
@@ -191,27 +234,29 @@ export class HttpClient {
     return Buffer.from(arrayBuffer);
   }
 
-  async post(path: string, body?: string | URLSearchParams): Promise<WreqResponse> {
-    if (!this.session) throw new Error("Not logged in");
-    return this.session.fetch(`${BASE_URL}${path}`, {
+  async post(
+    path: string,
+    body?: string | URLSearchParams,
+    options?: { retrySafe?: boolean },
+  ): Promise<WreqResponse> {
+    return this.request(path, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: body?.toString(),
-    });
+    }, options?.retrySafe === true);
   }
 
   async postJson(path: string, body: unknown): Promise<WreqResponse> {
-    if (!this.session) throw new Error("Not logged in");
-    return this.session.fetch(`${BASE_URL}${path}`, {
+    return this.request(path, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest",
       },
       body: JSON.stringify(body),
-    });
+    }, false);
   }
 
   async postRaw(
@@ -219,14 +264,13 @@ export class HttpClient {
     body: string,
     headers?: Record<string, string>,
   ): Promise<WreqResponse> {
-    if (!this.session) throw new Error("Not logged in");
-    return this.session.fetch(`${BASE_URL}${path}`, {
+    return this.request(path, {
       method: "POST",
       headers: {
         ...(headers ?? {}),
       },
       body,
-    });
+    }, false);
   }
 
   getPhpSessId(): string | null {
@@ -252,9 +296,9 @@ export class HttpClient {
 
   async logout(): Promise<void> {
     if (!this.session) return;
-    const resp = await this.session.fetch(`${BASE_URL}/vendas/logout`, {
+    const resp = await this.request("/vendas/logout", {
       redirect: "manual",
-    });
+    }, false);
     if (resp.status !== 302) {
       throw new Error(`Logout failed — expected 302, got ${resp.status}`);
     }

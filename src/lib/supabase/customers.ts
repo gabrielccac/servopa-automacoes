@@ -1,4 +1,4 @@
-import { altSupabaseRestGetAll, supabaseRestGetAll } from "./client.js";
+import { altSupabaseRestGetAll, quoteCsvValue, supabaseRestGetAll } from "./client.js";
 
 export interface Customer {
   nr_contrato: string | null;
@@ -11,6 +11,7 @@ export interface Customer {
   nr_diavenc: number | null;
   nr_grupo: string | null;
   nm_cpfcnpj_consorciado?: string | null;
+  ds_meio_pagamento?: string | null;
 }
 
 interface BirthdayReminderCustomer extends Customer {
@@ -214,22 +215,48 @@ export async function fetchActiveBirthdayCustomersToday(asOfDate?: string): Prom
   return [...servopaCustomers, ...altBirthdayCustomers];
 }
 
-export async function fetchUpcomingPaymentReminderCustomers(asOfDate?: string): Promise<Customer[]> {
+export async function fetchUpcomingPaymentReminderCustomers(
+  asOfDate?: string,
+  payloadCustomers?: Customer[],
+): Promise<Customer[]> {
+  const contracts = payloadCustomers?.map((customer) => String(customer.nr_contrato ?? "").trim()).filter(Boolean);
+  if (contracts && contracts.length === 0) return [];
+  const filter = contracts
+    ? `&nr_contrato=in.(${encodeURIComponent([...new Set(contracts)].map(quoteCsvValue).join(","))})`
+    : "&dt_cancelamento=is.null&nr_diavenc=not.is.null";
   const rows = await supabaseRestGetAll<Customer>(
-    "/rest/v1/bd_producao?select=nr_contrato,nm_consorciado,cd_whatsapp,dt_cancelamento,nr_cota,dt_contemplacao,nr_diavenc,nr_grupo&dt_cancelamento=is.null&nr_diavenc=not.is.null",
+    `/rest/v1/bd_producao?select=nr_contrato,nm_consorciado,cd_whatsapp,dt_cancelamento,nr_cota,dt_contemplacao,nr_diavenc,nr_grupo,ds_meio_pagamento${filter}`,
   );
+  const eligibleRows = rows.filter((row) =>
+    String(row.ds_meio_pagamento ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .trim().replace(/\s+/g, " ").toUpperCase() !== "CARTAO DE CREDITO",
+  );
+  if (payloadCustomers) {
+    // The database controls eligibility even when a manual payload omits or overrides the payment method.
+    const byContract = new Map(eligibleRows.map((row) => [row.nr_contrato, row]));
+    return payloadCustomers
+      .filter((customer) => byContract.has(String(customer.nr_contrato ?? "").trim()))
+      .map((customer) => ({
+        ...customer,
+        ds_meio_pagamento: byContract.get(String(customer.nr_contrato ?? "").trim())!.ds_meio_pagamento,
+      }));
+  }
   const targetDay = getDayAfterTomorrowDayInSaoPaulo(getReferenceDate(asOfDate));
 
-  return rows.filter((row) => row.nr_diavenc === targetDay);
+  return eligibleRows.filter((row) => row.nr_diavenc === targetDay);
 }
 
-export async function fetchActiveContemplationCustomersToday(asOfDate?: string): Promise<Customer[]> {
+export async function fetchActiveRecentContemplationCustomers(asOfDate?: string): Promise<Customer[]> {
   const rows = await supabaseRestGetAll<Customer>(
     "/rest/v1/bd_producao?select=nr_contrato,nm_consorciado,cd_whatsapp,dt_cancelamento,nr_cota,dt_contemplacao,nr_diavenc,nr_grupo&dt_cancelamento=is.null&dt_contemplacao=not.is.null",
   );
   const todayIso = asOfDate ?? getTodayIsoDateInSaoPaulo();
+  const yesterdayIso = getTodayIsoDateInSaoPaulo(getDateInSaoPauloDaysAhead(-1, getReferenceDate(todayIso)));
 
-  return rows.filter((row) => String(row.dt_contemplacao || "").startsWith(todayIso));
+  return rows.filter((row) => {
+    const contemplationDate = String(row.dt_contemplacao || "").slice(0, 10);
+    return contemplationDate === todayIso || contemplationDate === yesterdayIso;
+  });
 }
 
 export async function fetchOverduePaymentRecords(): Promise<OverduePaymentRecord[]> {

@@ -1,5 +1,6 @@
 import { buildDateScopedReminderIdempotencyKey } from "../idempotency.js";
 import { normalizePhone } from "../parsers.js";
+import { requestWithRetries } from "../servopa/http-client.js";
 import {
   fetchReminderLogs,
   isTerminalReminderLogStatus,
@@ -136,6 +137,7 @@ export async function sendReminderMessage(
     phone: string;
     message: string;
     buttonActions: ZApiButtonAction[];
+    refreshButtonActions?: () => Promise<ZApiButtonAction[]>;
     dryRun: boolean;
   },
 ): Promise<{ sendMode: ReminderSendMode; sendResponse: ZApiSendTextResponse | null }> {
@@ -143,11 +145,37 @@ export async function sendReminderMessage(
     return { sendMode: "dry-run", sendResponse: null };
   }
 
-  if (input.buttonActions.length > 0) {
+  let buttonActions = input.buttonActions;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      for (const button of buttonActions) {
+        if (button.type !== "URL" || button.label !== "Boleto") continue;
+        const document = await requestWithRetries(async () => {
+          // Check public access without the authenticated portal session.
+          const response = await fetch(button.url, { signal: AbortSignal.timeout(15_000) });
+          return { status: response.status, ok: response.ok, bytes: Buffer.from(await response.arrayBuffer()) };
+        });
+        if (!document.ok) throw new Error(`Boleto link validation failed - HTTP ${document.status}`);
+        if (document.bytes.subarray(0, 5).toString() !== "%PDF-") {
+          throw new Error("Boleto link validation failed - response is not a PDF");
+        }
+      }
+      break;
+    } catch (error) {
+      if (attempt >= 1 || !input.refreshButtonActions) throw error;
+      console.warn("Boleto link validation failed; extracting links again (1/1)");
+      buttonActions = await input.refreshButtonActions();
+      if (!buttonActions.some((button) => button.type === "URL" && button.label === "Boleto")) {
+        throw new Error("Boleto link refresh failed - boleto URL is missing");
+      }
+    }
+  }
+
+  if (buttonActions.length > 0) {
     const sendResponse = await sendButtonActionsMessage(zapiConfig, {
       phone: input.phone,
       message: input.message,
-      buttonActions: input.buttonActions,
+      buttonActions,
     });
     return { sendMode: "button-actions", sendResponse };
   }
@@ -208,7 +236,7 @@ export async function runTextReminderWorkflow<TCustomer>(
     payload: ReminderTaskInput<TCustomer>;
     requiredCustomerKeys: string[];
     reminderType: string;
-    referenceDate: string | ((asOfDate: string | null) => string);
+    referenceDate: string | ((asOfDate: string | null, customer: TCustomer) => string);
     logger: { log: (message: string, data?: Record<string, unknown>) => void };
     label: string;
     fetchCustomers: (asOfDate?: string) => Promise<TCustomer[]>;
@@ -237,9 +265,9 @@ export async function runTextReminderWorkflow<TCustomer>(
     options.payload,
     options.requiredCustomerKeys,
   );
-  const referenceDate =
+  const getReferenceDate = (customer: TCustomer) =>
     typeof options.referenceDate === "function"
-      ? options.referenceDate(asOfDate)
+      ? options.referenceDate(asOfDate, customer)
       : options.referenceDate;
   const initialCustomers = payloadCustomers ?? (await options.fetchCustomers(asOfDate ?? undefined));
   const shouldApplyReminderLogFilter = !payloadCustomers || respectIdempotency;
@@ -253,7 +281,7 @@ export async function runTextReminderWorkflow<TCustomer>(
     const dedupKey = buildDateScopedReminderIdempotencyKey(
       options.reminderType,
       getIdempotencyKeyValue(customer) ?? null,
-      referenceDate,
+      getReferenceDate(customer),
     );
 
     if (seenDedupKeys.has(dedupKey)) {
@@ -268,7 +296,7 @@ export async function runTextReminderWorkflow<TCustomer>(
     buildDateScopedReminderIdempotencyKey(
       options.reminderType,
       getIdempotencyKeyValue(customer) ?? null,
-      referenceDate,
+      getReferenceDate(customer),
     ),
   );
   const existingLogs =
@@ -284,7 +312,7 @@ export async function runTextReminderWorkflow<TCustomer>(
         const idempotencyKey = buildDateScopedReminderIdempotencyKey(
           options.reminderType,
           getIdempotencyKeyValue(customer) ?? null,
-          referenceDate,
+          getReferenceDate(customer),
         );
         return !isTerminalReminderLogStatus(existingByKey.get(idempotencyKey)?.status);
       })
@@ -305,6 +333,7 @@ export async function runTextReminderWorkflow<TCustomer>(
   });
 
   for (const customer of customers) {
+    const referenceDate = getReferenceDate(customer);
     const idempotencyKey = buildDateScopedReminderIdempotencyKey(
       options.reminderType,
       getIdempotencyKeyValue(customer) ?? null,

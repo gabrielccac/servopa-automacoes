@@ -2,6 +2,7 @@ import { logger, task } from "@trigger.dev/sdk";
 import { getConfig } from "../lib/config.js";
 import {
   getCustomerPaymentInfo,
+  refreshCustomerPaymentLinks,
   type CustomerPaymentInfoResult,
   type CustomerPaymentInstallment,
 } from "../lib/servopa/customer-payment-info.js";
@@ -501,6 +502,10 @@ export const overduePaymentReminder = task({
                 phone,
                 message: reminderMessage,
                 buttonActions,
+                refreshButtonActions: async () => {
+                  await refreshCustomerPaymentLinks(client, customerRef, selectedTarget.selectedBoleto);
+                  return buildButtonActions(selectedTarget.selectedBoleto);
+                },
                 dryRun,
               });
               const status = dryRun ? "dry-run" : "sent";

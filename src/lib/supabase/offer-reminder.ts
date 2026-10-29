@@ -1,4 +1,12 @@
 import { quoteCsvValue, supabaseRestGetAll } from "./client.js";
+import { parseGroupOfferHierarchy, type OfferGroupConfig } from "../reminders/offer-policy.js";
+
+export async function fetchOfferGroupConfigs(): Promise<OfferGroupConfig[]> {
+  const rows = await supabaseRestGetAll<{ nr_grupo: number; regras_texto: string | null }>(
+    "/rest/v1/grupos?select=nr_grupo,regras_texto",
+  );
+  return rows.map((row) => parseGroupOfferHierarchy(row.nr_grupo, row.regras_texto));
+}
 
 export interface OfferReminderCandidate {
   nr_contrato: string | null;

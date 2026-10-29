@@ -6,6 +6,7 @@ import {
   parseAsOfDate,
   parseReminderPayload,
   runTextReminderWorkflow,
+  sendReminderMessage,
 } from "./reminders/shared.js";
 import { getBirthdayReminderIdentity } from "../trigger/birthday-reminder.js";
 import { resolveReminderStage } from "../trigger/overdue-payment-reminder.js";
@@ -13,8 +14,134 @@ import { getNextOfferStep } from "../trigger/offer-reminder.js";
 import { buildOfferReminderIdempotencyKey } from "./idempotency.js";
 import { normalizeRequestedDtVenc } from "../trigger/submit-bid.js";
 import { getCustomerLanceOptions } from "./servopa/customer-lances.js";
+import { getCustomerPaymentInfo, refreshCustomerPaymentLinks } from "./servopa/customer-payment-info.js";
+import type { HttpClient } from "./servopa/http-client.js";
 import type { OverduePaymentRecord } from "./supabase/customers.js";
 import { buildDailyExecutionSummary } from "../trigger/daily-orchestrator.js";
+
+test("boleto links must return a PDF before any WhatsApp send; dry runs make no requests", async (t) => {
+  const boletoUrl = "https://www.consorcioservopa.com.br/docparser/view/fixture";
+  const input = {
+    phone: "5511999990001", message: "Fixture reminder", dryRun: false,
+    buttonActions: [{ id: "1", type: "URL" as const, label: "Boleto", url: boletoUrl }],
+  };
+  const config = {
+    baseUrl: "https://zapi.fixture", instanceId: "fixture", instanceToken: "fixture", clientToken: "fixture",
+    executionSummaryPhone: null, restoreDeliveryWebhookUrl: null, deliveryWaitTimeout: "5m",
+  };
+  let body = "Erro";
+  let status = 200;
+  let sendCount = 0;
+  const fetch = t.mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === boletoUrl) {
+      assert.equal(init?.headers, undefined);
+      return new Response(body, { status });
+    }
+    assert.equal(String(url), "https://zapi.fixture/instances/fixture/token/fixture/send-button-actions");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      phone: input.phone, message: input.message, buttonActions: input.buttonActions,
+    });
+    sendCount++;
+    return new Response(JSON.stringify({ messageId: "fixture-message" }));
+  });
+  await assert.rejects(sendReminderMessage(config, input), /response is not a PDF/);
+  assert.equal(sendCount, 0);
+  body = "<html>Login</html>";
+  await assert.rejects(sendReminderMessage(config, input), /response is not a PDF/);
+  status = 404;
+  await assert.rejects(sendReminderMessage(config, input), /HTTP 404/);
+  assert.equal(sendCount, 0);
+  status = 200;
+  body = "%PDF-1.7\nfixture";
+  assert.equal((await sendReminderMessage(config, input)).sendMode, "button-actions");
+  assert.equal(sendCount, 1);
+  const callsBeforeDryRun = fetch.mock.callCount();
+  await sendReminderMessage(config, { ...input, dryRun: true });
+  assert.equal(fetch.mock.callCount(), callsBeforeDryRun);
+});
+
+test("invalid boleto is extracted again once and only validated replacement links are sent", async (t) => {
+  const config = {
+    baseUrl: "https://zapi.fixture", instanceId: "fixture", instanceToken: "fixture", clientToken: "fixture",
+    executionSummaryPhone: null, restoreDeliveryWebhookUrl: null, deliveryWaitTimeout: "5m",
+  };
+  const oldUrl = "https://boleto.fixture/old";
+  const newUrl = "https://boleto.fixture/new";
+  const replacement = [
+    { id: "1", type: "URL" as const, label: "Boleto", url: newUrl },
+    { id: "2", type: "URL" as const, label: "Pix", url: "https://pix.fixture/new" },
+  ];
+  let refreshed = 0;
+  let sent = 0;
+  let replacementValid = true;
+  const checked: string[] = [];
+  const input = {
+    phone: "5511999990001", message: "Fixture", dryRun: false,
+    buttonActions: [{ id: "1", type: "URL" as const, label: "Boleto", url: oldUrl }],
+    refreshButtonActions: async () => { refreshed++; return replacement; },
+  };
+  t.mock.method(globalThis, "fetch", async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).startsWith("https://boleto.fixture/")) {
+      checked.push(String(url));
+      return new Response(String(url) === newUrl && replacementValid ? "%PDF-1.7\nfixture" : "Erro");
+    }
+    assert.equal(String(url), "https://zapi.fixture/instances/fixture/token/fixture/send-button-actions");
+    assert.deepEqual(JSON.parse(String(init?.body)).buttonActions, replacement);
+    sent++;
+    return new Response(JSON.stringify({ messageId: "fixture-message" }));
+  });
+  await sendReminderMessage(config, input);
+  assert.deepEqual(checked, [oldUrl, newUrl]);
+  assert.equal(refreshed, 1);
+  assert.equal(sent, 1);
+
+  replacementValid = false;
+  await assert.rejects(sendReminderMessage(config, input), /not a PDF/);
+  assert.equal(refreshed, 2);
+  assert.equal(sent, 1);
+  await assert.rejects(sendReminderMessage(config, {
+    ...input, refreshButtonActions: async () => [],
+  }), /boleto URL is missing/);
+  await assert.rejects(sendReminderMessage(config, {
+    ...input, refreshButtonActions: async () => { throw new Error("extrato unavailable"); },
+  }), /extrato unavailable/);
+  assert.equal(sent, 1);
+  await sendReminderMessage(config, { ...input, dryRun: true });
+  assert.equal(refreshed, 2);
+});
+
+test("re-extraction preserves the exact contract, installment and charge type", async () => {
+  const customer = { nr_contrato: "FIXTURE1", grupo: "1", plano: "2", digito: "3" };
+  let contract = customer.nr_contrato;
+  let rows = [["12", "Normal"], ["13", "Normal"], ["12", "Diluicao"]];
+  let calls = 0;
+  const client = {
+    get: async (path: string) => {
+      calls++;
+      if (path !== "/vendas/extrato") {
+        assert.equal(path, "/vendas/painel/1/3/2/FIXTURE1/V");
+        return new Response("");
+      }
+      return new Response(`<div class="main-info-block-col"><span>Contrato</span><strong>${contract}</strong></div>
+        <div class="block"><h2>Parcelas Emitidas</h2><table><tbody>${rows.map(([number, type]) =>
+          `<tr><td>${number}</td><td>${type}</td>${"<td>100,00</td>".repeat(6)}
+          <td><a href="/boleto/${number}/${type}/${calls}">Gerar Boleto</a>
+          <a data-src="/pix/${number}/${type}/${calls}">Pagar com PIX</a></td></tr>`).join("")}</tbody></table></div>`);
+    },
+  } as unknown as HttpClient;
+  const info = await getCustomerPaymentInfo(client, customer);
+  const original = info.boletos[0];
+  await refreshCustomerPaymentLinks(client, customer, original);
+  assert.equal(original.boleto_url, "https://www.consorcioservopa.com.br/boleto/12/Normal/4");
+  assert.equal(original.pix_url, "https://www.consorcioservopa.com.br/pix/12/Normal/4");
+  rows = [["13", "Normal"], ["12", "Diluicao"]];
+  await assert.rejects(refreshCustomerPaymentLinks(client, customer, original), /missing or ambiguous/);
+  rows = [["12", "Normal"], ["12", "Normal"]];
+  await assert.rejects(refreshCustomerPaymentLinks(client, customer, original), /missing or ambiguous/);
+  contract = "OTHER";
+  await assert.rejects(refreshCustomerPaymentLinks(client, customer, original), /context mismatch/);
+  assert.equal(original.boleto_url, "https://www.consorcioservopa.com.br/boleto/12/Normal/4");
+});
 
 test("parseSemicolonCsv keeps quoted semicolons together", () => {
   const rows = parseSemicolonCsv('NOME;OBS\n"Ana";"linha;com;separador"');
@@ -172,16 +299,11 @@ test("offer selection only returns the highest available Fidelidade level", () =
   const available = (options: Array<["FIXO" | "FIDELIDADE", 15 | 30]>) =>
     options.map(([lance_type, pct_lance]) => ({ lance_type, pct_lance }));
 
+  const choose = (current: Parameters<typeof getNextOfferStep>[0], options: Parameters<typeof getNextOfferStep>[1]) =>
+    getNextOfferStep(current, options, [30, 15]);
+  assert.equal(choose(null, available([["FIDELIDADE", 30]])), null);
   assert.deepEqual(
-    getNextOfferStep(null, available([["FIXO", 30], ["FIDELIDADE", 30]])),
-    {
-      lanceType: "FIDELIDADE",
-      pctLance: 30,
-      reminderType: "offer_fidelidade_30",
-    },
-  );
-  assert.deepEqual(
-    getNextOfferStep(
+    choose(
       { tp_lance: "FIXO", pct_lance: 30 },
       available([["FIXO", 15], ["FIDELIDADE", 30]]),
     ),
@@ -192,20 +314,20 @@ test("offer selection only returns the highest available Fidelidade level", () =
     },
   );
   assert.deepEqual(
-    getNextOfferStep({ tp_lance: "FIXO", pct_lance: 30 }, available([["FIXO", 15]])),
+    choose({ tp_lance: "FIXO", pct_lance: 30 }, available([["FIXO", 15]])),
     null,
   );
-  assert.deepEqual(getNextOfferStep({ tp_lance: "FIXO", pct_lance: 15 }, available([["FIDELIDADE", 30]])), {
+  assert.deepEqual(choose({ tp_lance: "FIXO", pct_lance: 15 }, available([["FIDELIDADE", 30]])), {
     lanceType: "FIDELIDADE",
     pctLance: 30,
     reminderType: "offer_fidelidade_30",
   });
-  assert.deepEqual(getNextOfferStep({ tp_lance: "FIDELIDADE", pct_lance: 30 }, available([["FIDELIDADE", 15]])), {
+  assert.deepEqual(choose({ tp_lance: "FIDELIDADE", pct_lance: 30 }, available([["FIDELIDADE", 15]])), {
     lanceType: "FIDELIDADE",
     pctLance: 15,
     reminderType: "offer_fidelidade_15",
   });
-  assert.equal(getNextOfferStep({ tp_lance: "FIDELIDADE", pct_lance: 15 }, available([["FIDELIDADE", 15]])), null);
+  assert.equal(choose({ tp_lance: "FIDELIDADE", pct_lance: 15 }, available([["FIDELIDADE", 15]])), null);
 });
 
 test("offer reminder idempotency stays stable across run dates", () => {

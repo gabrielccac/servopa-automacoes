@@ -168,6 +168,25 @@ function parseParcelas($: CheerioAPI): CustomerPaymentInstallment[] {
     .filter(isNotNull);
 }
 
+export async function refreshCustomerPaymentLinks(
+  client: HttpClient,
+  customer: ServopaCustomerRef,
+  boleto: CustomerPaymentInstallment,
+): Promise<void> {
+  if (boleto.nr_parcela === null || !boleto.ds_tipo) {
+    throw new Error("Cannot refresh boleto without installment number and type");
+  }
+  const refreshed = await getCustomerPaymentInfo(client, customer);
+  const matches = refreshed.boletos.filter(
+    (candidate) => candidate.nr_parcela === boleto.nr_parcela && candidate.ds_tipo === boleto.ds_tipo,
+  );
+  if (matches.length !== 1 || !matches[0].boleto_url) {
+    throw new Error("Boleto link refresh failed - original installment is missing or ambiguous");
+  }
+  boleto.boleto_url = matches[0].boleto_url;
+  boleto.pix_url = matches[0].pix_url;
+}
+
 export async function getCustomerPaymentInfo(
   client: HttpClient,
   customer: ServopaCustomerRef

@@ -1,7 +1,7 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { CONTEMPLATION_REMINDER_TYPE } from "../lib/supabase/reminder-logs.js";
 import {
-  fetchActiveContemplationCustomersToday,
+  fetchActiveRecentContemplationCustomers,
   getTodayIsoDateInSaoPaulo,
   type Customer,
 } from "../lib/supabase/customers.js";
@@ -25,10 +25,12 @@ export const contemplationReminder = task({
       payload: payload as ContemplationReminderTaskInput,
       requiredCustomerKeys: CONTEMPLATION_CUSTOMER_KEYS,
       reminderType: CONTEMPLATION_REMINDER_TYPE,
-      referenceDate: (asOfDate) => asOfDate ?? getTodayIsoDateInSaoPaulo(),
+      // Keep the same key when yesterday's contemplation arrives in today's sync.
+      referenceDate: (asOfDate, customer) =>
+        customer.dt_contemplacao?.slice(0, 10) || asOfDate || getTodayIsoDateInSaoPaulo(),
       logger,
       label: "Contemplation reminder",
-      fetchCustomers: fetchActiveContemplationCustomersToday,
+      fetchCustomers: fetchActiveRecentContemplationCustomers,
       buildMessage: (customer) =>
         buildContemplationReminderMessage(
           customer.nm_consorciado,
