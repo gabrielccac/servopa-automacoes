@@ -73,6 +73,9 @@ Não há necessidade de MCP Supabase para operar a integração existente: use o
 do projeto. Um MCP Supabase é opcional e precisa de autenticação própria. `service_role`
 não é token de gestão nem senha PostgreSQL. SQL exige acesso adicional ou execução
 manual no painel. Não rodar novamente `sql/001_grupos.sql` se as tabelas já existem.
+Para a revisão dos grupos em JSONB, conferir a pendência em `status.md` e seguir
+as etapas do README (SQL 002, backfill, deploy/coleta, SQL 003). Não aplicar a
+limpeza durante setup nem publicar código dependente de colunas ainda inexistentes.
 
 ## 3. Trigger.dev: conta e MCP
 

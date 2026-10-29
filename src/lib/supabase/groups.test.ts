@@ -1,34 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { groupListingFixture, groupDetailsFixture } from "../../../test-fixtures/groups.js";
-import { parseGroupDetails, parseGroupHistory, parseGroupListing } from "../servopa/groups.js";
+import { parseGroupDetails, parseGroupListing } from "../servopa/groups.js";
 import { HttpClient } from "../servopa/http-client.js";
 import { mergeGroupData, runGroupSync, type GroupRow } from "./groups.js";
 
-test("group merge preserves failed sections and old history, and retires only missing plans", () => {
-  const html = groupDetailsFixture();
-  const sections = { ...parseGroupDetails(html, 9999),
-    historico_com_embutido: parseGroupHistory(groupDetailsFixture("COM EMBUTIDO"), 9999, "com_embutido") };
-  const first = mergeGroupData(undefined, 9999, parseGroupListing(groupListingFixture(), 9999), sections, "2026-10-29T12:00:00Z");
-  first.planos!.push({ ...first.planos![0], categoria: "OLD" });
+test("group merge preserves failed sections and calendar history but never posts retired fields", () => {
+  const sections = parseGroupDetails(groupDetailsFixture(), 9999);
+  const listing = parseGroupListing(groupListingFixture(), 9999);
+  const first = mergeGroupData(undefined, 9999, listing, sections, "2026-10-29T12:00:00Z");
   first.assembleias!.push({ ...first.assembleias![0], numero: 16 });
   const original = structuredClone(first);
-  const next = mergeGroupData(first, 9999, parseGroupListing(groupListingFixture(), 9999), {
+  const next = mergeGroupData(Object.assign({}, first, { planos: ["retired"], created_at: "retired" }), 9999, listing, {
     ...sections, cadastro: { status: "falha", erro: "fixture" },
-    historico_sem_embutido: { status: "sem_historico" },
-    historico_com_embutido: { status: "falha", erro: "fixture" },
+    taxas_administracao: { status: "falha", erro: "fixture" },
+    regras_assembleias: { status: "falha", erro: "fixture" },
   }, "2026-10-30T12:00:00Z");
   assert.deepEqual(first, original);
-  assert.equal(next.planos!.length, 2);
-  assert.equal(next.planos!.find((row) => row.categoria === "OLD")!.disponivel, false);
-  assert.equal(next.planos![0].disponivel, true);
+  assert.deepEqual(next.taxas_administracao, first.taxas_administracao);
+  assert.deepEqual(next.regras_assembleias, first.regras_assembleias);
   assert.equal(next.assembleias!.length, 2);
-  assert.deepEqual(next.historico_lances, first.historico_lances);
-  assert.equal(next.atualizacao_secoes!.cadastro, "2026-10-29T12:00:00Z");
-  assert.equal(next.atualizacao_secoes!.planos, "2026-10-30T12:00:00Z");
+  assert.equal("planos" in next, false);
+  assert.equal("created_at" in next, false);
+  assert.equal("atualizacao_secoes" in next, false);
 });
 
-test("group workflow discovers, deduplicates, supports dry run and records partial/failed runs", async (t) => {
+test("group sync discovers all groups, supports dry run, and logs partial/failed sections without history requests", async (t) => {
   Object.assign(process.env, {
     SERVOPA_CPF_CNPJ: "fixture", SERVOPA_SENHA: "fixture",
     SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture",
@@ -36,22 +33,19 @@ test("group workflow discovers, deduplicates, supports dry run and records parti
   });
   let stored: GroupRow[] = [];
   const logs: { status: string; trigger_run_id: string }[] = [];
-  let groupWrites = 0;
-  let failEmbedded = false;
-  let wrongGroup = false;
-  let failAudit = false;
+  let groupWrites = 0, wrongGroup = false, failAudit = false, failRules = false;
   t.mock.method(HttpClient.prototype, "login", async () => undefined);
   t.mock.method(HttpClient.prototype, "logout", async () => undefined);
   t.mock.method(HttpClient.prototype, "close", async () => undefined);
   t.mock.method(HttpClient.prototype, "post", async (path: string, body?: string | URLSearchParams) => {
     assert.equal(path, "/vendas/grupos");
-    const group = Number(new URLSearchParams(body).get("grupofrm"));
-    return { ok: true, text: async () => groupListingFixture(group) } as never;
+    return { ok: true, text: async () => groupListingFixture(Number(new URLSearchParams(body).get("grupofrm"))) } as never;
   });
   t.mock.method(HttpClient.prototype, "get", async (path: string) => {
-    if (failEmbedded && path.endsWith("/L")) throw Error("fixture history unavailable");
+    assert.ok(path.endsWith("/S"));
     const group = Number(path.split("/").at(-2));
-    return { ok: true, text: async () => groupDetailsFixture(path.endsWith("/L") ? "COM EMBUTIDO" : "SEM EMBUTIDO", wrongGroup ? 1111 : group) } as never;
+    const html = groupDetailsFixture(wrongGroup ? 1111 : group);
+    return { ok: true, text: async () => failRules ? html.replace("FIDELIDADE 30%", "FIDELIDADE ESPECIAL") : html } as never;
   });
   t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -59,9 +53,9 @@ test("group workflow discovers, deduplicates, supports dry run and records parti
     if (url.pathname === "/rest/v1/bd_producao") return new Response(JSON.stringify([{ nr_grupo: 9999 }, { nr_grupo: "9999" }]));
     if (url.pathname === "/rest/v1/grupos" && init?.method === "GET") return new Response(JSON.stringify(stored));
     if (url.pathname === "/rest/v1/grupos") {
-      assert.equal(url.searchParams.get("on_conflict"), "nr_grupo");
       groupWrites++;
       stored = JSON.parse(String(init?.body));
+      assert.equal("regras_texto" in stored[0], false);
       return new Response(null, { status: 201 });
     }
     assert.equal(url.pathname, "/rest/v1/grupos_sincronizacoes");
@@ -73,21 +67,18 @@ test("group workflow discovers, deduplicates, supports dry run and records parti
   assert.equal((await runGroupSync({ dryRun: true }, "fixture-run", logger)).groupCount, 1);
   assert.equal(groupWrites, 0);
   assert.equal(logs.length, 0);
-  const first = await runGroupSync({}, "fixture-run", logger);
-  assert.equal(first.successCount, 1);
-  assert.equal(first.changedCount, 1);
+  assert.equal((await runGroupSync({}, "fixture-run", logger)).successCount, 1);
   assert.equal(logs[0].trigger_run_id, "fixture-run");
   stored[0].proxima_assembleia_em = "2026-11-23T19:00:00+00:00";
   assert.equal((await runGroupSync({}, "fixture-run-2", logger)).changedCount, 0);
-  assert.equal(logs.length, 2);
-  const oldHistory = structuredClone(stored[0].historico_lances);
-  failEmbedded = true;
+  const previousRules = structuredClone(stored[0].regras_assembleias);
+  failRules = true;
   assert.equal((await runGroupSync({}, "fixture-run-3", logger)).partialCount, 1);
-  assert.deepEqual(stored[0].historico_lances, oldHistory);
+  assert.deepEqual(stored[0].regras_assembleias, previousRules);
   wrongGroup = true;
-  const writesBeforeFailure = groupWrites;
+  const before = groupWrites;
   assert.equal((await runGroupSync({}, "fixture-run-4", logger)).errorCount, 1);
-  assert.equal(groupWrites, writesBeforeFailure);
+  assert.equal(groupWrites, before);
   assert.equal(logs.at(-1)!.status, "falha");
   wrongGroup = false;
   failAudit = true;

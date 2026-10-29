@@ -36,7 +36,7 @@ Replays de datas antigas são bloqueados; recuperação manual deve usar as tare
 originais após conferir os logs. Novos dias de vencimento exigem atualizar o cron
 e sua seleção. As ofertas do dia 15 não refazem o lote de lances do dia 14.
 
-O `offer-reminder` consulta as regras salvas em `grupos` em cada execução e
+O `offer-reminder` consulta `grupos.regras_assembleias` em cada execução e
 calcula a hierarquia de Fidelidade daquele grupo (por exemplo, 30/15 ou
 30/20/10). Cruza essa hierarquia com as opções individuais disponíveis na
 Servopa e com o estado de `lances`; histórico de mensagens não comprova aceite.
@@ -49,17 +49,44 @@ e-mail dependem de processos externos a este repositório.
 ## Desenvolvimento
 
 A task `groups-sync` consulta os grupos distintos de `bd_producao` e os já
-armazenados em `grupos`. Atualiza cadastro, planos, assembleias e históricos
-com/sem embutido; registra cada tentativa em `grupos_sincronizacoes`.
+armazenados em `grupos`. Atualiza cadastro, regras por faixa de assembleia,
+taxas de administração com suas condições e calendário; registra cada tentativa
+em `grupos_sincronizacoes`. Não coleta mais histórico de lances nem grava planos.
 Execute com `{ "dryRun": true }` para ler o portal sem gravar, ou
 `{ "groups": [1565], "dryRun": true }` para limitar a consulta. Sem `groups`,
-consulta toda a referência. A execução normal grava os dados e o histórico.
-Seções com falha preservam seus dados anteriores; planos ausentes só ficam
-indisponíveis após leitura completa. O texto das regras é preservado, sem
-inferir a elegibilidade individual dos clientes. A task não envia mensagens
+consulta toda a referência. Seções com falha preservam seus dados anteriores;
+taxas só são substituídas depois de leitura completa. As observações e condições
+das regras ficam nos JSONs, sem inferir elegibilidade individual. A task não envia mensagens
 e é chamada pelo cron `scheduled-groups-sync` nos dias 1 e 15 às 07:00 São Paulo.
 A sincronização e as ofertas têm horários independentes: falha na atualização
 preserva dados anteriores e não bloqueia automaticamente a análise de ofertas.
+
+### Migração para grupos estruturados
+
+Esta mudança exige SQL administrativo; credencial REST não executa DDL.
+Não publicar a nova versão antes da etapa 1 e do backfill:
+
+1. Aplicar `sql/002_grupos_estruturados.sql`: adiciona `regras_assembleias`,
+   `taxas_administracao` e a view `grupos_regras_assembleias`; não exclui dados.
+2. Conferir e migrar o estado existente (cria backup ignorado em `.local` antes de escrever):
+
+```sh
+node --env-file=.env --import tsx scripts/migrate-group-structure.ts
+node --env-file=.env --import tsx scripts/migrate-group-structure.ts --apply
+```
+
+3. Publicar, executar `groups-sync` normal e validar os grupos e as duas colunas.
+4. Aplicar `sql/003_grupos_limpeza.sql`, que bloqueia exclusão se faltarem regras
+   ou taxas em algum grupo. Remove somente as nove colunas aprovadas de `grupos`.
+   Não altera `disponivel_para_vender`, `resultado_ultimas_assembleias` ou dados de clientes.
+
+`regras_assembleias` tem faixas inclusivas (`assembleia_inicio`, `assembleia_fim`,
+com fim `null` quando ilimitado), `modalidades` em ordem e `observacoes`.
+Modalidades distinguem SORTEIO/FIXO/FIDELIDADE/LIVRE, percentual e uso de embutido.
+Dois sorteios permanecem duas entradas. A view apresenta uma linha por modalidade/faixa.
+`taxas_administracao` mantém categoria, descrição, percentual, crédito e prazos;
+um grupo pode ter várias taxas. `updated_at` é a última gravação, não prova de
+atualização completa: conferir sucesso/falha por seção em `grupos_sincronizacoes`.
 
 Requer Node.js com npm. Python é usado na matriz ampla de diagnóstico de login.
 

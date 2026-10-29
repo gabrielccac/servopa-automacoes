@@ -22,7 +22,30 @@ oficial; publicação no GitHub não significa deploy no Trigger.dev.
 - Esta entrega inclui o código de grupos, a nova seleção de ofertas, a skill,
   o setup e os guias versionados. Consulte o histórico de commits da branch.
 
-## Implementado e publicado
+## Revisão estruturada — código novo, migração/deploy pendentes
+
+O código atual troca `regras_texto` por `regras_assembleias` JSONB e `planos` por
+`taxas_administracao` JSONB. Mantém tipos, percentuais, próxima assembleia,
+calendário, disponibilidade e `updated_at`. Remove os nove campos aprovados
+somente após migração validada. As tabelas do Daily Sync não são alteradas.
+As faixas preservam a ordem dos sorteios e das modalidades, inclusive repetições,
+percentuais, uso de embutido e observações/condições contratuais.
+O fluxo de ofertas passa a ler o JSON validado, mantendo a regra de disponibilidade
+individual; não aplica bloqueio adicional por fase nem reconstrói pagamentos.
+
+38 testes e TypeScript estrito passaram. Conversão em leitura dos 32 registros:
+93 faixas e 881 condições de taxa. Dry run real da nova task no portal concluiu
+32 grupos com sucesso, sem falhas parciais, sem gravação nem mensagens.
+
+Execução da migração: aplicar `sql/002_grupos_estruturados.sql`, rodar
+`scripts/migrate-group-structure.ts` em leitura e depois com `--apply`, conferir
+o backup em `.local`, publicar a nova versão e executar `groups-sync` normal.
+Somente após validação de todos os registros aplicar `sql/003_grupos_limpeza.sql`.
+O acesso REST atual não permite DDL e o navegador Supabase não estava autenticado;
+a aplicação do SQL foi solicitada ao responsável. Não anunciar migração, população
+ou deploy como concluídos antes de verificar o banco e o worker real.
+
+## Histórico da versão publicada
 
 ### Grupos
 

@@ -3,24 +3,26 @@ import { randomUUID } from "node:crypto";
 import { getConfig } from "../config.js";
 import { HttpClient } from "../servopa/http-client.js";
 import {
-  parseGroupListing, parseGroupDetails, parseGroupHistory, groupPlanKey,
-  type GroupPlan, type GroupAssembly, type GroupBidHistory, type GroupSection,
+  parseGroupListing, parseGroupDetails,
+  type GroupAdministrationRate, type GroupAssembly,
 } from "../servopa/groups.js";
+import type { GroupAssemblyRule } from "../servopa/group-rules.js";
 import { supabaseRestGetAll, supabaseRestPost } from "./client.js";
 
 type Details = ReturnType<typeof parseGroupDetails>;
 type Characteristics = Extract<Details["cadastro"], { status: "ok" }>["data"];
 export type GroupRow = Partial<Characteristics & ReturnType<typeof parseGroupListing>> & {
   nr_grupo: number;
-  planos?: GroupPlan[] | null;
+  taxas_administracao?: GroupAdministrationRate[] | null;
+  regras_assembleias?: GroupAssemblyRule[] | null;
   assembleias?: GroupAssembly[] | null;
-  historico_lances?: GroupBidHistory[] | null;
-  atualizacao_secoes?: Record<string, string>;
-  ultima_visualizacao_em?: string;
-  created_at?: string;
   updated_at?: string;
 };
-type Sections = Details & { historico_com_embutido: GroupSection<GroupBidHistory[]> };
+type Sections = Details;
+const GROUP_COLUMNS = ["nr_grupo", "segmento", "prazo_total_meses", "vagas_disponiveis", "numero_consorciados",
+  "dia_vencimento", "percentual_embutido", "percentual_fundo_reserva", "percentual_seguro", "tipo_sorteio",
+  "tipo_seguro", "tipo_grupo", "proxima_assembleia_numero", "proxima_assembleia_em", "disponivel",
+  "taxas_administracao", "regras_assembleias", "assembleias", "updated_at"] as const;
 export interface GroupSyncPayload { groups?: number[]; dryRun?: boolean }
 
 function mergeRecords<T>(old: T[], current: T[], key: (item: T) => string): T[] {
@@ -30,36 +32,24 @@ function mergeRecords<T>(old: T[], current: T[], key: (item: T) => string): T[] 
 }
 export function mergeGroupData(previous: GroupRow | undefined, group: number,
   listing: ReturnType<typeof parseGroupListing>, sections: Sections, now: string): GroupRow {
-  const next: GroupRow = { ...previous, nr_grupo: group, ...listing,
-    atualizacao_secoes: { ...previous?.atualizacao_secoes, listagem: now },
-    ultima_visualizacao_em: now, updated_at: now };
-  for (const [name, section] of Object.entries(sections)) {
-    if (section.status === "ok") next.atualizacao_secoes![name] = now;
-  }
+  // Never send retired columns back to PostgREST during the schema transition.
+  const retained = Object.fromEntries(GROUP_COLUMNS.filter((key) => previous && key in previous)
+    .map((key) => [key, previous![key]]));
+  const next: GroupRow = { ...retained, nr_grupo: group, ...listing, updated_at: now };
   if (sections.cadastro.status === "ok") Object.assign(next, sections.cadastro.data);
-  if (sections.planos.status === "ok") {
-    const current = sections.planos.data.map((plan) => ({ ...plan, disponivel: true, ultima_visualizacao_em: now }));
-    next.planos = mergeRecords((previous?.planos ?? []).map((plan) => ({ ...plan, disponivel: false })), current, groupPlanKey);
-  }
+  if (sections.taxas_administracao.status === "ok") next.taxas_administracao = sections.taxas_administracao.data;
+  if (sections.regras_assembleias.status === "ok") next.regras_assembleias = sections.regras_assembleias.data;
   if (sections.assembleias.status === "ok") {
     next.assembleias = mergeRecords(previous?.assembleias ?? [], sections.assembleias.data, (row) => String(row.numero));
-  }
-  const histories = [sections.historico_sem_embutido, sections.historico_com_embutido];
-  if (histories.some((section) => section.status === "ok")) {
-    next.historico_lances = mergeRecords(previous?.historico_lances ?? [],
-      histories.flatMap((section) => section.status === "ok" ? section.data : []),
-      (row) => `${row.assembleia_numero}:${row.modalidade}`);
   }
   return next;
 }
 function businessData(row: GroupRow | undefined) {
   if (!row) return null;
-  const { created_at: _created, updated_at: _updated, ultima_visualizacao_em: _seen, atualizacao_secoes: _sections,
-    planos, ...data } = row;
+  const { updated_at: _updated, ...data } = row;
   // Database defaults and metadata do not constitute a business change.
   return { ...data,
-    proxima_assembleia_em: data.proxima_assembleia_em ? new Date(data.proxima_assembleia_em).toISOString() : null,
-    planos: planos?.map(({ ultima_visualizacao_em: _seen, ...plan }) => plan) };
+    proxima_assembleia_em: data.proxima_assembleia_em ? new Date(data.proxima_assembleia_em).toISOString() : null };
 }
 async function write(path: string, body: unknown, upsert = false): Promise<void> {
   const response = await supabaseRestPost(path, body, {
@@ -104,15 +94,7 @@ export async function runGroupSync(payload: GroupSyncPayload = {}, runId?: strin
         const detailResponse = await client.get(`/vendas/grupos/${group}/S`);
         if (!detailResponse.ok) throw new Error(`Group details failed - HTTP ${detailResponse.status}`);
         const details = parseGroupDetails(await detailResponse.text(), group);
-        let embedded: GroupSection<GroupBidHistory[]>;
-        try {
-          const response = await client.get(`/vendas/grupos/${group}/L`);
-          if (!response.ok) throw new Error(`Embedded group history failed - HTTP ${response.status}`);
-          embedded = parseGroupHistory(await response.text(), group, "com_embutido");
-        } catch (error) {
-          embedded = { status: "falha", erro: error instanceof Error ? error.message : String(error) };
-        }
-        const sections = { ...details, historico_com_embutido: embedded };
+        const sections = details;
         result.secoes.listagem = { status: "ok" };
         for (const [name, section] of Object.entries(sections)) {
           result.secoes[name] = { status: section.status,

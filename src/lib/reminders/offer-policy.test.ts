@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getNextOfferStep, offerPrecheck, parseGroupOfferHierarchy } from "./offer-policy.js";
+import { parseGroupAssemblyRules } from "../servopa/group-rules.js";
 
 test("group hierarchies distinguish Fixo from Fidelidade and recognize all group percentages", () => {
-  assert.deepEqual(parseGroupOfferHierarchy(1, "LANCE FIXO 30%; LANCE FIDELIDADE DE 15% FIXO").hierarquia_fidelidade, [15]);
-  assert.deepEqual(parseGroupOfferHierarchy(2, "LANCE FIDELIDADE 30%; LANCE FIDELIDADE DE\n20%; LANCE FIDELIDADE DE 10%; LANCE FIDELIDADE 30%").hierarquia_fidelidade, [30, 20, 10]);
-  assert.deepEqual(parseGroupOfferHierarchy(3, "LANCE FIXO; LANCE LIVRE COM EMBUTIDO 30%").hierarquia_fidelidade, []);
+  const rules = (body: string) => parseGroupAssemblyRules(`- ORDEM DAS CONTEMPLAÇÕES:\n${body}`);
+  assert.deepEqual(parseGroupOfferHierarchy(1, rules("LANCE FIXO 30%; LANCE FIDELIDADE DE 15% FIXO")).hierarquia_fidelidade, [15]);
+  assert.deepEqual(parseGroupOfferHierarchy(2, rules("LANCE FIDELIDADE 30%; LANCE FIDELIDADE DE 20%; LANCE FIDELIDADE DE 10%; LANCE FIDELIDADE 30%")).hierarquia_fidelidade, [30, 20, 10]);
+  assert.deepEqual(parseGroupOfferHierarchy(3, rules("LANCE FIXO; LANCE LIVRE COM EMBUTIDO 30%")).hierarquia_fidelidade, []);
   assert.ok(parseGroupOfferHierarchy(4, null).erro);
   assert.ok(parseGroupOfferHierarchy(5, "LANCE FIDELIDADE ESPECIAL").erro);
   assert.ok(parseGroupOfferHierarchy(6, "LANCE FIDELIDADE 120%").erro);

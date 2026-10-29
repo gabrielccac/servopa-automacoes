@@ -1,21 +1,14 @@
 import { load, type CheerioAPI } from "cheerio";
 import type { Element } from "domhandler";
+import { parseGroupAssemblyRules } from "./group-rules.js";
 
-export type GroupMode = "sem_embutido" | "com_embutido";
-export interface GroupPlan {
+export interface GroupAdministrationRate {
   categoria: string;
   descricao: string;
-  taxa_administracao: number;
+  percentual: number;
   prazo_meses: number;
   prazo_original_meses: number;
   valor_credito: number;
-  percentual_mensal: number;
-  parcela_sem_seguro: number;
-  seguro: number;
-  observacao: string;
-  parcela_total: number;
-  disponivel?: boolean;
-  ultima_visualizacao_em?: string;
 }
 export interface GroupAssembly {
   numero: number;
@@ -25,16 +18,8 @@ export interface GroupAssembly {
   cidade: string;
   situacao: string;
 }
-export interface GroupBidHistory {
-  assembleia_numero: number;
-  data: string;
-  modalidade: GroupMode;
-  maior_lance: number;
-  menor_lance: number;
-  quantidade: number;
-}
 export type GroupSection<T> = { status: "ok"; data: T } |
-  { status: "falha"; erro: string } | { status: "sem_historico" };
+  { status: "falha"; erro: string };
 
 function text(value: string): string { return value.replace(/\s+/g, " ").trim(); }
 function normalized(value: string): string {
@@ -89,8 +74,8 @@ function unique<T>(items: T[], key: (item: T) => string): T[] {
   if (new Set(items.map(key)).size !== items.length) throw new Error("Duplicate group records in source");
   return items;
 }
-export function groupPlanKey(plan: GroupPlan): string {
-  return `${plan.categoria}:${plan.taxa_administracao}:${plan.prazo_original_meses}`;
+function rateKey(rate: GroupAdministrationRate): string {
+  return `${rate.categoria}:${rate.percentual}:${rate.prazo_original_meses}:${rate.valor_credito}`;
 }
 export function captureGroupSection<T>(read: () => T): GroupSection<T> {
   try { return { status: "ok", data: read() }; }
@@ -125,13 +110,7 @@ function parseCharacteristics($: CheerioAPI) {
   const next = /^(\d+)\s*-\s*(.+)$/.exec(field("Próxima assembléia"));
   if (!next) throw new Error("Invalid next group assembly");
   const nextDate = dateTime(next[2]);
-  const rules = $(".grupo-info > .pre-message").first().clone();
-  rules.find("br").replaceWith("\n");
-  const regras_texto = rules.text().trim();
-  if (!regras_texto) throw new Error("Missing group rules");
   return {
-    contemplados_sorteio: integer(field("Contemplados por sorteio")),
-    contemplados_lance: integer(field("Contemplados por lance")),
     percentual_embutido: percent(field("Lance Embutido")),
     numero_consorciados: integer(field("Número de consorciados")),
     dia_vencimento: integer(field("Vencimento dia"), 1, 31),
@@ -140,11 +119,14 @@ function parseCharacteristics($: CheerioAPI) {
     tipo_sorteio: field("Tipo de sorteio"), tipo_seguro: field("Tipo de seguro"), tipo_grupo: field("Tipo de grupo"),
     proxima_assembleia_numero: integer(next[1], 1),
     proxima_assembleia_em: `${nextDate.data}T${nextDate.horario}:00-03:00`,
-    previsao_reajuste: date(field("Previsão para o próximo reajuste (sujeito a alteração em caso de gatilho para o índice)")),
-    regras_texto,
   };
 }
-function parsePlans($: CheerioAPI): GroupPlan[] {
+function parseRules($: CheerioAPI) {
+  const rules = $(".grupo-info > .pre-message").first().clone();
+  rules.find("br").replaceWith("\n");
+  return parseGroupAssemblyRules(rules.text().trim());
+}
+function parseAdministrationRates($: CheerioAPI): GroupAdministrationRate[] {
   const tables = tableWithHeaders($, ["Categoria", "Descrição", "Valor do Crédito", "Prazo", "% Mensal", "Parcela (Sem Seguro)", "Seguro", "Observação", "Total (Parcela + Seguro)"]);
   const rates = $(".tabs a").map((_, e) => text($(e).text())).get().filter((s) => s.startsWith("Taxa de Adm"));
   if (!tables.length || tables.length !== rates.length) throw new Error("Missing or inconsistent group plan tables/rates");
@@ -157,14 +139,13 @@ function parsePlans($: CheerioAPI): GroupPlan[] {
       if (!c[0] || !c[1]) throw new Error("Missing group plan identity");
       const originalTerm = $(element).attr("data-url")?.split("/").at(-2);
       return {
-        categoria: c[0], descricao: c[1], taxa_administracao: percent(rate[1]),
+        categoria: c[0], descricao: c[1], percentual: percent(rate[1]),
         prazo_meses: integer(c[3], 1), prazo_original_meses: integer(originalTerm ?? c[3], 1),
-        valor_credito: groupNumber(c[2]), percentual_mensal: percent(c[4]),
-        parcela_sem_seguro: groupNumber(c[5]), seguro: groupNumber(c[6]), observacao: c[7], parcela_total: groupNumber(c[8]),
+        valor_credito: groupNumber(c[2]),
       };
     });
   });
-  return unique(plans, groupPlanKey);
+  return unique(plans, rateKey);
 }
 function parseAssemblies($: CheerioAPI): GroupAssembly[] {
   const tables = tableWithHeaders($, ["Assembléia", "Data", "Local", "Cidade", "Situação", "Visualizar"]);
@@ -176,31 +157,13 @@ function parseAssemblies($: CheerioAPI): GroupAssembly[] {
   if (!items.length) throw new Error("Unexpected empty group assembly table");
   return unique(items, (item) => String(item.numero));
 }
-export function parseGroupHistory(html: string, group: number, mode: GroupMode): GroupSection<GroupBidHistory[]> {
-  assertGroupPage(html, group);
-  const $ = load(html);
-  const tables = tableWithHeaders($, ["Assembléia", "Data", "Maior Lance", "Menor Lance", "Tipo", "Quantidade"]);
-  if (!tables.length && normalized($(".main-view-container").text()).includes("historico nao encontrado para esta modalidade de lance")) {
-    return { status: "sem_historico" };
-  }
-  return captureGroupSection(() => {
-    if (tables.length !== 1) throw new Error("Missing group bid history table");
-    const items = rows($, tables[0], 6).map(({ cells: c }) => {
-      if (normalized(c[4]).replace(/ /g, "_") !== mode) throw new Error("Group bid history modality mismatch");
-      return { assembleia_numero: integer(c[0], 1), data: date(c[1]), modalidade: mode,
-        maior_lance: percent(c[2]), menor_lance: percent(c[3]), quantidade: integer(c[5]) };
-    });
-    if (!items.length) throw new Error("Unexpected empty group bid history table");
-    return unique(items, (item) => `${item.assembleia_numero}:${item.modalidade}`);
-  });
-}
 export function parseGroupDetails(html: string, group: number) {
   assertGroupPage(html, group);
   const $ = load(html);
   return {
     cadastro: captureGroupSection(() => parseCharacteristics($)),
-    planos: captureGroupSection(() => parsePlans($)),
+    regras_assembleias: captureGroupSection(() => parseRules($)),
+    taxas_administracao: captureGroupSection(() => parseAdministrationRates($)),
     assembleias: captureGroupSection(() => parseAssemblies($)),
-    historico_sem_embutido: parseGroupHistory(html, group, "sem_embutido"),
   };
 }

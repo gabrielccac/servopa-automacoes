@@ -108,6 +108,13 @@ ser retrocedida em uma submissão real para burlar o controle mensal.
 
 ## Desenvolvimento e deploy
 
+**Migração de grupos estruturados:** antes de publicar a mudança que remove
+`regras_texto`, seguir as quatro etapas do README (SQL 002 → backfill com backup →
+deploy + groups-sync → SQL 003). Não executar a limpeza antes da população validada.
+Use a view `grupos_regras_assembleias` para consultar faixas/modalidades; confira
+`assembleia_inicio`/`assembleia_fim`, ordem e percentuais. Condições contratuais
+ficam em `observacoes`, sem inferir elegibilidade individual.
+
 1. Inspecione `git status`, branch e versão ativa. As alterações devem partir do
    código correto, incluindo mudanças locais ainda não publicadas.
 2. Leia `AGENTS.md` e a skill Trigger adequada antes de modificar tarefas.

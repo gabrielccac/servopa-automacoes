@@ -66,7 +66,7 @@ O horário nominal é sujeito à janela do plano e à fila. Não criar crons dup
 nos filhos. Replays dos wrappers fora da data pretendida são bloqueados.
 O cron de grupos às 07:00 antecede as ofertas das 09:00, mas não cria dependência
 de sucesso entre eles. Falhas por seção preservam os dados anteriores; conferir
-`atualizacao_secoes` e `grupos_sincronizacoes` ao investigar uma oferta.
+os resultados por seção em `grupos_sincronizacoes` ao investigar uma oferta.
 
 ## Tabelas principais
 
@@ -80,7 +80,8 @@ de sucesso entre eles. Falhas por seção preservam os dados anteriores; conferi
 | `inadimplentes` | Ciclos: `dt_primeira_ocorrencia`, `dt_ultima_ocorrencia`, `st_ativo` e contexto da cota |
 | `resultado_ultimas_assembleias` | Relatório por grupo/modalidade; não é a agenda completa futura |
 | `disponivel_para_vender` | Disponibilidade comercial do relatório; não substitui os detalhes dos grupos |
-| `grupos` | Registro por grupo, características e listas JSONB |
+| `grupos` | Características, regras por faixa, taxas com condições e calendário em JSONB |
+| `grupos_regras_assembleias` | View: uma linha por grupo/faixa/modalidade; não duplica armazenamento |
 | `grupos_sincronizacoes` | Auditoria de cada tentativa de atualização de grupo |
 
 Não procurar `logs_lances` ou assumir que a tabela se chama `bid_logs`:
@@ -126,8 +127,8 @@ O link pode expirar depois do envio; a duração da validade não foi comprovada
 ## Ofertas e lances
 
 `fidelidade-sync` indica evidência histórica de modalidade do grupo; não prova que
-um cliente está apto hoje. A nova oferta lê `grupos.regras_texto`, extrai percentuais
-de Fidelidade (não confundir com Fixo), deduplica e ordena a hierarquia. Falha de
+um cliente está apto hoje. A nova oferta lê `grupos.regras_assembleias`, valida as
+faixas e extrai somente percentuais de modalidades FIDELIDADE, deduplica e ordena a hierarquia. Falha de
 interpretação bloqueia aquele grupo. Exemplo: `[30, 20, 10]`.
 
 Somente estado conhecido de `lances` segue para evolução. Fixo é uma modalidade
@@ -151,17 +152,19 @@ use `dryRun: true`.
 
 ## Grupos e JSONB
 
-Os campos fixos incluem segmento, prazo total, vagas, número de consorciados,
-contemplados por sorteio/lance, vencimento, percentuais de embutido/reserva/seguro,
-tipo de sorteio/seguro/grupo, próxima assembleia e previsão de reajuste.
-`regras_texto` preserva o conteúdo integral com quebras de linha.
+Os campos fixos mantidos incluem grupo, segmento, prazo total, vagas, número de
+consorciados, vencimento, percentuais de embutido/reserva/seguro, tipo de sorteio,
+seguro/grupo, próxima assembleia, disponibilidade e `updated_at`.
+As bases originais do Daily Sync permanecem intactas. A limpeza remove somente
+`previsao_reajuste`, `planos`, `historico_lances`, `regras_texto`, `contemplados_sorteio`,
+`contemplados_lance`, `ultima_visualizacao_em`, `atualizacao_secoes` e `created_at`
+de `grupos`, após migrar e validar os JSONs novos.
 
 | JSONB | Conteúdo |
 |---|---|
-| `planos` | Categoria, descrição, taxa de administração, prazo restante/original, crédito, percentual mensal, parcela sem seguro, seguro, observação, total, disponibilidade e última visualização |
+| `taxas_administracao` | Categoria, descrição, percentual de administração, prazo restante/original e valor do crédito; não assumir taxa única por grupo |
 | `assembleias` | Número, data, horário, local, cidade e situação |
-| `historico_lances` | Assembleia, data, modalidade com/sem embutido, maior/menor lance e quantidade |
-| `atualizacao_secoes` | Última atualização válida de cada seção, separando os dois históricos |
+| `regras_assembleias` | Faixas inclusivas, modalidades ordenadas (inclusive sorteios repetidos) e observações/condições preservadas |
 
 `NULL` significa não coletado/disponível; `[]` significa lista coletada sem itens,
 não falha. Zero informado é um valor real. Percentuais usam pontos: `30` representa
@@ -169,10 +172,13 @@ não falha. Zero informado é um valor real. Percentuais usam pontos: `30` repre
 Datas em JSON usam ISO; horários do calendário são locais de São Paulo. A coluna
 `proxima_assembleia_em` é `timestamptz`, portanto a API pode retorná-la em UTC.
 
-Os merges preservam assembleias/históricos anteriores. Planos que desaparecem de
-uma leitura completa tornam-se indisponíveis; falha de seção preserva seu conteúdo
-e timestamp. Busca sem identificação inequívoca do grupo não apaga o registro antigo.
-O histórico do portal pode estar defasado mesmo quando o calendário já avançou.
+Os merges preservam assembleias anteriores. Taxas são substituídas somente com
+leitura completa. Falha de seção preserva seu conteúdo, registrada na auditoria;
+`updated_at` sozinho não comprova que todas as seções foram atualizadas.
+Busca sem identificação inequívoca do grupo não apaga o registro antigo.
+`assembleia_fim: null` indica faixa sem limite; percentuais nulos não significam zero.
+LIVRE COM EMBUTIDO 30% usa `percentual_embutido: 30`, não percentual de lance fixo.
+Regras não reconhecidas falham e preservam o JSON anterior; não inventar faixas.
 
 Em `grupos_sincronizacoes`, cada tentativa registra `nr_grupo`, `trigger_run_id`,
 `status` (`sucesso`, `parcial`, `falha`), datas, `resultado_secoes` e `erro`.
@@ -189,8 +195,8 @@ seguras. POST de registro não deve ser repetido cegamente após resposta perdid
 pois o fornecedor pode ter executado a ação. Preservar a sessão/contrato nos retries.
 
 Buscas administrativas: POST `/vendas/grupos` com `URLSearchParams` (`grupofrm`,
-`tp_lance`); detalhes GET `/vendas/grupos/<grupo>/S` e `/L`. `S` é sem embutido,
-`L` com embutido. Os botões de venda não fazem parte da coleta.
+`tp_lance`); detalhes GET `/vendas/grupos/<grupo>/S`. A consulta adicional `/L`
+foi retirada junto com o histórico de lances. Botões de venda não fazem parte da coleta.
 
 O projeto usa Z-API para envio e serviços externos para respostas/aceites e
 redirecionamento da confirmação gerencial. Não afirmar que o processamento dos

@@ -1,4 +1,5 @@
 import type { CustomerLanceOption } from "../servopa/customer-lances.js";
+import { validateGroupAssemblyRules } from "../servopa/group-rules.js";
 
 export interface OfferStep {
   lanceType: "FIDELIDADE";
@@ -15,16 +16,16 @@ export interface OfferGroupConfig {
   erro?: string;
 }
 
-export function parseGroupOfferHierarchy(group: number, rules: string | null): OfferGroupConfig {
-  if (!rules?.trim()) return { nr_grupo: group, hierarquia_fidelidade: [], erro: "Missing group rules" };
-  const normalized = rules.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ");
-  const values = [...normalized.matchAll(/LANCE FIDELIDADE(?: DE)? (\d+(?:,\d+)?)\s*%/g)]
-    .map((match) => Number(match[1].replace(",", ".")));
-  if (values.some((value) => !Number.isInteger(value) || value <= 0 || value > 100) ||
-    (!values.length && normalized.includes("FIDELIDADE"))) {
-    return { nr_grupo: group, hierarquia_fidelidade: [], erro: "Unrecognized group Fidelidade rules" };
+export function parseGroupOfferHierarchy(group: number, rules: unknown): OfferGroupConfig {
+  try {
+    const phases = validateGroupAssemblyRules(rules);
+    // Individual availability still comes from Servopa; this change only replaces text parsing.
+    const values = phases.flatMap((phase) => phase.modalidades)
+      .filter((mode) => mode.tipo === "FIDELIDADE").map((mode) => mode.percentual!);
+    return { nr_grupo: group, hierarquia_fidelidade: [...new Set(values)].sort((a, b) => b - a) };
+  } catch (error) {
+    return { nr_grupo: group, hierarquia_fidelidade: [], erro: error instanceof Error ? error.message : "Invalid group rules" };
   }
-  return { nr_grupo: group, hierarquia_fidelidade: [...new Set(values)].sort((a, b) => b - a) };
 }
 
 export function offerPrecheck(current: TrackedLanceState | null, group: OfferGroupConfig | undefined) {
