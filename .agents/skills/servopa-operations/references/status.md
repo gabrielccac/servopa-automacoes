@@ -7,8 +7,8 @@ oficial; publicação no GitHub não significa deploy no Trigger.dev.
 ## Produção confirmada
 
 - Projeto Trigger: `proj_wmgnkaivkyvudwfshcad`.
-- Worker confirmado em 29/10: **20261029.2**, SDK **4.5.16**, 16 tarefas.
-- Deploy: https://cloud.trigger.dev/projects/v3/proj_wmgnkaivkyvudwfshcad/deployments/nqttrr0o
+- Worker confirmado em 29/10: **20261029.3**, SDK **4.5.16**, 16 tarefas.
+- Deploy: https://cloud.trigger.dev/projects/v3/proj_wmgnkaivkyvudwfshcad/deployments/ugvhpdvc
 - Inclui grupos, ofertas por hierarquia e os três novos crons de produção, além dos
   retries HTTP, filtro de cartão, validação de boleto e contemplação hoje/ontem.
 - API confirmou quatro schedules ativos em produção: grupos dias 1 e 15 às 07:00,
@@ -22,7 +22,7 @@ oficial; publicação no GitHub não significa deploy no Trigger.dev.
 - Esta entrega inclui o código de grupos, a nova seleção de ofertas, a skill,
   o setup e os guias versionados. Consulte o histórico de commits da branch.
 
-## Revisão estruturada — código novo, migração/deploy pendentes
+## Revisão estruturada — publicada e populada; limpeza SQL pendente
 
 O código atual troca `regras_texto` por `regras_assembleias` JSONB e `planos` por
 `taxas_administracao` JSONB. Mantém tipos, percentuais, próxima assembleia,
@@ -33,19 +33,24 @@ percentuais, uso de embutido e observações/condições contratuais.
 O fluxo de ofertas passa a ler o JSON validado, mantendo a regra de disponibilidade
 individual; não aplica bloqueio adicional por fase nem reconstrói pagamentos.
 
-38 testes e TypeScript estrito passaram. Conversão em leitura dos 32 registros:
-93 faixas e 881 condições de taxa. Dry run real da nova task no portal concluiu
-32 grupos com sucesso, sem falhas parciais, sem gravação nem mensagens.
+38 testes e TypeScript estrito passaram. SQL 002 aplicado pelo responsável e
+confirmado por REST. Backfill aplicado com backup local ignorado em `.local`:
+32 grupos, 93 faixas e 881 condições de taxa; hierarquias comparadas com a versão
+anterior nos 32 grupos sem divergências. View confirmada com 365 linhas.
 
-Execução da migração: aplicar `sql/002_grupos_estruturados.sql`, rodar
-`scripts/migrate-group-structure.ts` em leitura e depois com `--apply`, conferir
-o backup em `.local`, publicar a nova versão e executar `groups-sync` normal.
-Somente após validação de todos os registros aplicar `sql/003_grupos_limpeza.sql`.
-O acesso REST atual não permite DDL e o navegador Supabase não estava autenticado;
-a aplicação do SQL foi solicitada ao responsável. Não anunciar migração, população
-ou deploy como concluídos antes de verificar o banco e o worker real.
+Produção: `groups-sync` run `run_06goi73i69td3a44gva7s6v8a2`, concluída em
+29/10 às 16:23 São Paulo, `dryRun: false`, worker `20261029.3`. Foram 32 grupos
+bem-sucedidos, zero parciais/falhas, 93 faixas, 881 condições de taxa e 757
+assembleias. Leitura posterior confirmou os JSONs e os 32 logs da mesma run;
+todos atendem aos pré-requisitos do SQL 003. Nenhum WhatsApp ou lance foi disparado.
 
-## Histórico da versão publicada
+Pendente somente a execução administrativa de `sql/003_grupos_limpeza.sql` e a
+conferência posterior do esquema. Ela já foi liberada após validar a coleta.
+As nove colunas antigas ainda estão no banco até essa execução. O acesso REST
+não permite DDL; a aplicação da limpeza foi solicitada ao responsável.
+Não anunciar a exclusão como concluída antes de verificar o esquema real.
+
+## Histórico anterior à estrutura JSONB
 
 ### Grupos
 
@@ -92,9 +97,10 @@ O servidor dev utilizado no teste integrado anterior foi encerrado.
   de sucesso; falhas preservam dados anteriores. Conferir logs e timestamps.
 - O calendário foi encontrado com datas passadas e futuras; próximas assembleias
   conferiram nos 32 grupos e havia datas até junho/2027. Refazer a checagem quando necessário.
-- Regras dos grupos estão em texto; interpretação automática identifica percentuais
-  de Fidelidade, mas não reconstrói histórico de pagamentos nem aplica fases da assembleia.
-  A consulta individual decide a disponibilidade naquele momento.
+- Regras estão estruturadas por faixa em JSONB; condições contratuais são
+  preservadas em `observacoes`. A oferta deriva a hierarquia do JSON, mas não
+  reconstrói pagamentos nem aplica bloqueio adicional por fase; a consulta
+  individual decide a disponibilidade naquele momento.
 - `lances_submetidos` ainda protege por contrato e mês, não por assembleia.
 - O recebimento de respostas de ofertas e a confirmação por webhook são externos
   a este repositório; compatibilidade dos callbacks com percentuais 20/10 não foi
