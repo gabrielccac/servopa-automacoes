@@ -53,16 +53,20 @@ cadastros e contratos para aniversário e verificação de ativos.
 | `submit-bid` | Pré-checagem, revisão gerencial, simulação, registro e comprovante | Mensagens, espera por confirmação, registro financeiro e auditoria |
 | `scheduled-submit-bid` | Cron de produção dias 6, 14 e 18, 09:00 São Paulo; seleciona vencimentos 8, 16 e 20 | Chama `submit-bid` com aprovação gerencial e proteção por data |
 | `scheduled-offers` | Cron de produção dias 1 e 15, 09:00 São Paulo | Chama `offer-reminder` com os dados atuais e proteção por data |
+| `scheduled-groups-sync` | Cron de produção dias 1 e 15, 07:00 São Paulo | Chama `groups-sync` para atualizar todos os grupos descobertos |
 | `groups-sync` | Busca e atualiza características de cada grupo | Escrita nas duas tabelas de grupos; nenhum WhatsApp |
 | `diagnose-servopa-access` | Diagnóstico de acesso do portal | Requisições de diagnóstico; ler payload/esquema antes de usar |
 | `diagnose-servopa-login-matrix` | Diagnóstico de perfis de login | Tentativas de autenticação; pode usar Python |
 
-Há três definições de cron: `daily-orchestrator` e os dois wrappers em
+Há quatro definições de cron: `daily-orchestrator` e os três wrappers em
 `src/trigger/monthly-schedules.ts`. Os novos crons são exclusivos de produção;
 as tarefas originais continuam disponíveis para execução manual e dry run.
 As datas de lances usam vencimento menos dois dias, sem planejador mensal.
 O horário nominal é sujeito à janela do plano e à fila. Não criar crons duplicados
 nos filhos. Replays dos wrappers fora da data pretendida são bloqueados.
+O cron de grupos às 07:00 antecede as ofertas das 09:00, mas não cria dependência
+de sucesso entre eles. Falhas por seção preservam os dados anteriores; conferir
+`atualizacao_secoes` e `grupos_sincronizacoes` ao investigar uma oferta.
 
 ## Tabelas principais
 

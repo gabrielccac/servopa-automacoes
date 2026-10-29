@@ -12,7 +12,11 @@ Quero que você configure este projeto Servopa Automações na minha máquina e 
 a me ajudar a manter o código e investigar execuções do Trigger.dev e do Supabase.
 
 Clone ou atualize o repositório https://github.com/gabrielccac/servopa-automacoes.
-Use a skill `$servopa-operations`, já presente em
+Leia o contexto completo em `.agents/skills/servopa-operations/references/project.md`,
+o estado atual em `references/status.md` e o setup em `references/setup.md`
+(os dois últimos relativos à mesma pasta `servopa-operations`). Esses arquivos
+Markdown podem ser lidos diretamente; não exigem instalação adicional de skill.
+Se o cliente reconhecer skills, use também `$servopa-operations`, já presente em
 `.agents/skills/servopa-operations/SKILL.md`, mantendo `references/` e `scripts/`
 juntos. Leia primeiro o estado da entrega e o guia de setup referenciados na skill.
 Consulte também a documentação operacional no Notion:
@@ -28,8 +32,11 @@ Realize o setup de ponta a ponta dentro do que os acessos disponíveis permitire
    trabalho existente e confira branch e commit. GitHub é a fonte de distribuição
    do código; a versão ativa no Trigger pode ser anterior ao código da branch.
 2. Confira Git/Node/npm, instale as dependências pelo lockfile e execute os testes.
-3. Configure o MCP do Trigger para `proj_wmgnkaivkyvudwfshcad`, com a minha conta
-   autorizada. Valide a conexão com uma chamada real, verificando o worker em produção.
+3. Faça o login do CLI com a minha própria conta autorizada do Trigger.dev:
+   `npx -y trigger.dev@4.5.16 login`. Ajude-me a concluir a autorização no navegador
+   e confirme a identidade com `whoami`. Configure o MCP para
+   `proj_wmgnkaivkyvudwfshcad` seguindo o guia de setup, reinicie a conexão se
+   necessário e valide-a com uma chamada real, verificando o worker em produção.
 4. Preserve meu `.env` se existir. Se faltarem credenciais, informe os nomes e como
    configurá-las localmente, sem pedir que eu cole segredos no chat. Não copie o
    perfil pessoal ou tokens de Gabriel. Ajude com o login interativo quando necessário.
@@ -52,6 +59,11 @@ os testes; quando eu solicitar publicação, faça o deploy e confirme a versão
 Não trate mensagens de oferta enviadas como aceites de cliente e não presuma que
 um lance sem registro já está autorizado. Os desconhecidos permanecem em revisão
 até eu orientar outra regra.
+
+O calendário vigente está nos documentos e no código: sincronização de grupos
+nos dias 1 e 15 às 07:00; ofertas nos dias 1 e 15 às 09:00; lances nos dias 6,
+14 e 18 às 09:00 para os vencimentos 8, 16 e 20. Tudo em `America/Sao_Paulo`.
+Não criar um planejador mensal nem duplicar esses crons durante o setup.
 
 ---
 

@@ -2,6 +2,7 @@ import { AbortTaskRunError, idempotencyKeys, logger, schedules } from "@trigger.
 import { getTodayIsoDateInSaoPaulo } from "../lib/supabase/customers.js";
 import { offerReminder } from "./offer-reminder.js";
 import { submitBid } from "./submit-bid.js";
+import { groupsSync } from "./groups-sync.js";
 
 function scheduledDate(timestamp: Date, days: number[]): string {
   if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime())) {
@@ -42,6 +43,19 @@ export async function runScheduledOffers(payload: { timestamp: Date }) {
   ).unwrap();
 }
 
+export async function runScheduledGroups(payload: { timestamp: Date }) {
+  const asOfDate = scheduledDate(payload.timestamp, [1, 15]);
+  logger.log("Scheduled group sync", { asOfDate });
+  return groupsSync.triggerAndWait(
+    {},
+    {
+      idempotencyKey: await idempotencyKeys.create(`scheduled-groups-sync:${asOfDate}`, { scope: "global" }),
+      idempotencyKeyTTL: "35d",
+      maxAttempts: 1,
+    },
+  ).unwrap();
+}
+
 export const scheduledSubmitBid = schedules.task({
   id: "scheduled-submit-bid",
   cron: {
@@ -68,4 +82,18 @@ export const scheduledOffers = schedules.task({
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
   run: runScheduledOffers,
+});
+
+export const scheduledGroupsSync = schedules.task({
+  id: "scheduled-groups-sync",
+  cron: {
+    pattern: "0 7 1,15 * *",
+    timezone: "America/Sao_Paulo",
+    window: "0m",
+    environments: ["PRODUCTION"],
+  },
+  maxDuration: 3600,
+  retry: { maxAttempts: 1 },
+  queue: { concurrencyLimit: 1 },
+  run: runScheduledGroups,
 });

@@ -22,6 +22,8 @@ Os novos crons de produção estão em `src/trigger/monthly-schedules.ts`, no fu
 `America/Sao_Paulo`, com horário nominal de 09:00:
 
 - `scheduled-offers`: dias 1 e 15 de cada mês, chama `offer-reminder`.
+- `scheduled-groups-sync`: dias 1 e 15 às 07:00, chama `groups-sync` para
+  atualizar os grupos antes das ofertas das 09:00.
 - `scheduled-submit-bid`: dias 6, 14 e 18, chama `submit-bid` para os vencimentos
   8, 16 e 20, respectivamente. Mantém a aprovação gerencial e os logs mensais.
 
@@ -55,7 +57,9 @@ consulta toda a referência. A execução normal grava os dados e o histórico.
 Seções com falha preservam seus dados anteriores; planos ausentes só ficam
 indisponíveis após leitura completa. O texto das regras é preservado, sem
 inferir a elegibilidade individual dos clientes. A task não envia mensagens
-e ainda não tem agendamento automático.
+e é chamada pelo cron `scheduled-groups-sync` nos dias 1 e 15 às 07:00 São Paulo.
+A sincronização e as ofertas têm horários independentes: falha na atualização
+preserva dados anteriores e não bloqueia automaticamente a análise de ofertas.
 
 Requer Node.js com npm. Python é usado na matriz ampla de diagnóstico de login.
 

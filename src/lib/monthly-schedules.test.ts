@@ -1,9 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { idempotencyKeys } from "@trigger.dev/sdk";
-import { runScheduledBids, runScheduledOffers } from "../trigger/monthly-schedules.js";
+import { runScheduledBids, runScheduledOffers, runScheduledGroups } from "../trigger/monthly-schedules.js";
 import { submitBid } from "../trigger/submit-bid.js";
 import { offerReminder } from "../trigger/offer-reminder.js";
+import { groupsSync } from "../trigger/groups-sync.js";
+
+test("scheduled group sync discovers all groups on days 1 and 15 and rejects stale runs", async (t) => {
+  const keys = t.mock.method(idempotencyKeys, "create", async (key: string) => key);
+  const child = t.mock.method(groupsSync, "triggerAndWait", () => ({ unwrap: async () => "fixture-result" }));
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-01T10:00:00Z") });
+  for (const day of ["01", "15"]) {
+    const date = `2026-11-${day}`;
+    const timestamp = new Date(`${date}T10:00:00Z`);
+    t.mock.timers.setTime(timestamp.getTime());
+    assert.equal(await runScheduledGroups({ timestamp }), "fixture-result");
+    const [payload, options] = child.mock.calls.at(-1)!.arguments;
+    assert.deepEqual(payload, {});
+    assert.equal(options?.idempotencyKey, `scheduled-groups-sync:${date}`);
+    assert.equal(options?.maxAttempts, 1);
+    assert.deepEqual(keys.mock.calls.at(-1)!.arguments[1], { scope: "global" });
+  }
+  await assert.rejects(runScheduledGroups({ timestamp: new Date("2026-11-01T10:00:00Z") }), /intended date/);
+  assert.equal(child.mock.callCount(), 2);
+});
 
 test("scheduled bids select only the matching payment day and keep one child per date", async (t) => {
   const keys = t.mock.method(idempotencyKeys, "create", async (key: string) => key);

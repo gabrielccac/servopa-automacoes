@@ -7,14 +7,16 @@ oficial; publicação no GitHub não significa deploy no Trigger.dev.
 ## Produção confirmada
 
 - Projeto Trigger: `proj_wmgnkaivkyvudwfshcad`.
-- Worker confirmado em 29/10: **20261029.1**, SDK **4.5.16**, 15 tarefas.
-- Deploy: https://cloud.trigger.dev/projects/v3/proj_wmgnkaivkyvudwfshcad/deployments/8qmevjr8
-- Inclui grupos, ofertas por hierarquia e os dois crons de produção, além dos
+- Worker confirmado em 29/10: **20261029.2**, SDK **4.5.16**, 16 tarefas.
+- Deploy: https://cloud.trigger.dev/projects/v3/proj_wmgnkaivkyvudwfshcad/deployments/nqttrr0o
+- Inclui grupos, ofertas por hierarquia e os três novos crons de produção, além dos
   retries HTTP, filtro de cartão, validação de boleto e contemplação hoje/ontem.
-- API confirmou três schedules ativos em produção: rotina diária às 08:00,
+- API confirmou quatro schedules ativos em produção: grupos dias 1 e 15 às 07:00,
+  rotina diária às 08:00,
   ofertas dias 1 e 15 às 09:00 e lances dias 6, 14 e 18 às 09:00 São Paulo.
   Novos schedules com `window: "0m"`; próximas datas nominais 01/11 (ofertas)
-  e 06/11 (lances). Horários efetivos retornados: 09:00:26 e 09:00:03.
+  e 06/11 (lances); grupos em 01/11. Horários efetivos retornados: 07:00:44
+  (grupos), 09:00:26 (ofertas) e 09:00:03 (lances).
   A fila ainda pode atrasar o início. Não há cron novo em dev.
 - Repositório: https://github.com/gabrielccac/servopa-automacoes
 - Esta entrega inclui o código de grupos, a nova seleção de ofertas, a skill,
@@ -46,7 +48,7 @@ Teste no worker dev **20261029.1**, run
 Zero mensagens enviadas e zero logs de oferta escritos. Motivos de exclusão:
 75 estados desconhecidos, 15 sem Fidelidade no grupo, 18 no último nível,
 1 oferta já enviada e 14 sem evolução disponível. É evidência histórica, não lista atual.
-Na publicação dos crons, 36 testes e TypeScript estrito passaram; os testes dos
+Na publicação dos crons, 37 testes e TypeScript estrito passaram; os testes dos
 wrappers simularam os disparos sem mensagens ou registros financeiros reais.
 O servidor dev utilizado no teste integrado anterior foi encerrado.
 
@@ -61,7 +63,10 @@ O servidor dev utilizado no teste integrado anterior foi encerrado.
   Os wrappers recusam datas antigas ou fora do calendário e usam chave global
   por data; as tarefas originais continuam disponíveis para recuperação manual.
   A oferta do dia 15 não refaz os lances já processados no dia 14.
-- Frequência de `groups-sync` ainda não definida: semanal ou quinzenal foram discutidas.
+- `scheduled-groups-sync` atualiza todos os grupos nos dias 1 e 15 às 07:00
+  São Paulo. A tarefa original `groups-sync` continua disponível manualmente.
+  O horário antecede as ofertas das 09:00, sem criar dependência automática
+  de sucesso; falhas preservam dados anteriores. Conferir logs e timestamps.
 - O calendário foi encontrado com datas passadas e futuras; próximas assembleias
   conferiram nos 32 grupos e havia datas até junho/2027. Refazer a checagem quando necessário.
 - Regras dos grupos estão em texto; interpretação automática identifica percentuais

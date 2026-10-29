@@ -144,7 +144,9 @@ task definida com `schedules.task`. Isso não significa que nosso planejador já
 
 A decisão vigente usa crons fixos em `src/trigger/monthly-schedules.ts`:
 ofertas dias 1 e 15; lances dias 6, 14 e 18 para vencimentos 8, 16 e 20.
-Horário nominal 09:00 São Paulo, novos crons exclusivos de produção.
+Horário nominal 09:00 São Paulo; sincronização de grupos dias 1 e 15 às 07:00.
+Novos crons exclusivos de produção. A sincronização anterior às ofertas não
+bloqueia seu envio se houver falha; conferir idade das seções e logs de grupos.
 Não implementar o planejador mensal anterior: foi substituído por essa decisão.
 O cron é registrado no deploy; a run aparece em cada ocorrência, sem deixar
 uma run `DELAYED` por cliente. Conferir no painel o cron, ambiente, estado ativo,
