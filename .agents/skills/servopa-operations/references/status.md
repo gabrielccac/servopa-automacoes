@@ -52,6 +52,19 @@ limpeza. As duas tabelas originais do Daily Sync continuam acessíveis.
 Não executar novamente o backfill legado após a exclusão de `regras_texto` e
 `planos`. Futuras atualizações usam a task e o cron existentes.
 
+### Dry run de ofertas após a limpeza
+
+Produção `20261029.3`, run `run_06goiqujc6e15iuba5r8moh5a2`, concluída em
+29/10 às 17:49 São Paulo com `{ "dryRun": true }`, fonte banco atual.
+130 contratos considerados, 22 selecionados para consulta individual, 7 candidatos
+em 4 mensagens previstas, todos Fidelidade 30% → 15% nos grupos 1565 e 1563.
+Zero erros, zero mensagens enviadas, zero contratos enviados e zero logs gravados.
+123 exclusões: 75 sem lance conhecido, 15 sem Fidelidade no grupo, 18 no último
+nível, 1 oferta já enviada e 14 sem evolução disponível individualmente.
+O resultado confirmou o consumo dos JSONs após remover as colunas antigas.
+Esta é uma fotografia do teste; reconsultar antes de afirmar a lista atual.
+Dados pessoais e o plano completo ficaram somente em `.local`, fora do GitHub.
+
 ## Histórico anterior à estrutura JSONB
 
 ### Grupos
